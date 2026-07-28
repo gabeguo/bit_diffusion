@@ -615,7 +615,7 @@ def main() -> None:
     parser.add_argument("--adam-beta1", type=float, default=0.9)
     parser.add_argument("--adam-beta2", type=float, default=0.999)
 
-    parser.add_argument("--eps", type=float, default=1e-4,
+    parser.add_argument("--eps", type=float, default=9.9e-4,
                         help="Margin for sampling t in (eps, 1-eps).")
     parser.add_argument("--time-sampler", type=str, default="uniform", choices=["uniform", "logit_normal"],
                         help="Time sampler to use for sampling t.")
@@ -651,7 +651,7 @@ def main() -> None:
     parser.add_argument("--eval-cfg-scales", type=float, nargs="+", default=[0.0, 1.0, 2.0],
                         help="CFG scale for evaluation.")
     # EMA
-    parser.add_argument("--ema-decay", type=float, default=0.9999)
+    parser.add_argument("--ema-decay", type=float, default=0.9995)
     parser.add_argument(
         "--alt-ema-decays", type=float, nargs="+", default=[],
         help="Additional EMA decay rates to maintain alongside the primary "
@@ -734,7 +734,7 @@ def main() -> None:
                         dest="eval_text_decode_num_samples", type=int, default=512,
                         help="Total number of samples for decoded text eval. Set to 0 to skip.")
     parser.add_argument("--eval-text-decode-batch-size", "--eval-i2t-batch-size",
-                        dest="eval_text_decode_batch_size", type=int, default=64)
+                        dest="eval_text_decode_batch_size", type=int, default=16)
     parser.add_argument("--no-eval-cider", action="store_true",
                         help="Skip CIDEr even if pycocoevalcap is installed.")
     parser.add_argument("--no-eval-clipscore", action="store_true",

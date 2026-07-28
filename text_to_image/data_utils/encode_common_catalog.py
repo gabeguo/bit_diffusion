@@ -51,11 +51,13 @@ import pyarrow.parquet as pq
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
+"""
 from datasets import load_dataset
 try:
     from datasets.distributed import split_dataset_by_node
 except ImportError:  # older datasets versions
     split_dataset_by_node = None
+"""
 from diffusers import AutoencoderKL
 from PIL import Image
 from torchvision.utils import make_grid, save_image

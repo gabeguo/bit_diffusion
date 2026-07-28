@@ -48,10 +48,10 @@ text_to_image/
 │   ├── dit.py              # DiT and cross-attention DiT models
 │   └── token_decoder.py    # Token-embedding decoder
 └── data_utils/
-    ├── encode_gpic.py
-    ├── encode_dino_features.py
+    ├── encode_gpic.py      # Creates the dataset embeddings
+    ├── encode_dino_features.py     # Gets REPA features
     ├── encode_global_text.py       # *(not extensively tested)*
-    └── latent_dataset.py
+    ├── latent_dataset.py           # Dataset loading code
     └── encode_common_catalog.py    # *legacy code*
 ```
 
