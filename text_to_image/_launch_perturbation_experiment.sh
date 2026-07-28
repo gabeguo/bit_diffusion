@@ -15,7 +15,9 @@ module load nccl/2.29.2-cu13
 module load conda
 conda activate dit_env
 
-export HF_HOME=$SCRATCH/cache_sub
+PREFIX_DIR=$SCRATCH # TODO: change to your own
+export HF_HOME=$PREFIX_DIR/cache_sub
+TODAY=$(date +%m_%d_%y)
 
 PYTHONPATH=.:.. python perturbation_slerp_experiment.py \
     --forward-ckpt hf://therealgabeguo/BiB_generative/large_scale/06_29_26/gpic_16_nodes_repa_15/step_0100000.pt \
@@ -31,4 +33,4 @@ PYTHONPATH=.:.. python perturbation_slerp_experiment.py \
     --cfg-scale 0 \
     --num-images 64 \
     --text-source image \
-    --out $SCRATCH/BiB_results/perturbation_slerp_results/07_14_26/llm_edit_infer_noise_new_prompt
+    --out $PREFIX_DIR/BiB_results/perturbation_slerp_results/${TODAY}/llm_edit_infer_noise_new_prompt

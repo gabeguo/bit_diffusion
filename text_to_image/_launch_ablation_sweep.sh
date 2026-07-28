@@ -22,10 +22,12 @@
 
 set -euo pipefail
 
-PREFIX_DIR=/data
+PREFIX_DIR=/data # TODO: change to your own
+TODAY=$(date +%m_%d_%y)
 SUBMIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SWEEP_ROOT=${PREFIX_DIR}/BiB_results/07_16_26/ablation_sweep
+SWEEP_ROOT=${PREFIX_DIR}/BiB_results/${TODAY}/ablation_sweep
 LOG_DIR=${PREFIX_DIR}/BiB_results/slurm_logs
+data_root=${DATA_ROOT:-${PREFIX_DIR}/gpic_text_to_image_dataset/gpic_latents/gpic_latents/train} # TODO: change to your own
 
 export HF_HOME=${PREFIX_DIR}/cache_sub
 
@@ -157,7 +159,7 @@ for si in "${!sde_tags[@]}"; do
         --use-token-text-bridge \
         --token-layout row_major \
         --x0-cond-source x0 \
-        --data-root /data/gpic_text_to_image_dataset/gpic_latents/gpic_latents/train \
+        --data-root ${data_root} \
         --out-dir ${out_dir} \
         --log-every 100 \
         --ckpt-every 10000 \

@@ -23,10 +23,12 @@
 set -euo pipefail
 
 # PREFIX_DIR=/pscratch/sd/g/gabeguo
-PREFIX_DIR=/data
+PREFIX_DIR=/data # TODO: change to your own
+TODAY=$(date +%m_%d_%y)
 SUBMIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SWEEP_ROOT=${PREFIX_DIR}/BiB_results/07_22_26/eval_ablation_repa
+SWEEP_ROOT=${PREFIX_DIR}/BiB_results/${TODAY}/eval_ablation
 LOG_DIR=${PREFIX_DIR}/BiB_results/slurm_logs
+data_root=${DATA_ROOT:-${PREFIX_DIR}/gpic_text_to_image_dataset/gpic_latents_TEST/TEST} # TODO: change to your own
 
 # ---------------------------------------------------------------------------
 # Sweep axes. Tags feed the unique name; flags are passed verbatim to train.py.
@@ -172,7 +174,7 @@ for si in "${!sde_tags[@]}"; do
         --use-token-text-bridge \
         --token-layout row_major \
         --x0-cond-source x0 \
-        --data-root /data/gpic_text_to_image_dataset/gpic_latents_TEST/TEST \
+        --data-root ${data_root} \
         --val-fraction 1.0 \
         --out-dir ${out_dir} \
         --log-every 100 \

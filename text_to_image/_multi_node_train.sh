@@ -30,8 +30,11 @@ export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 
-export PREFIX_DIR=/pscratch/sd/g/gabeguo
+export PREFIX_DIR=/pscratch/sd/g/gabeguo # TODO: change to your own prefix directory
 export HF_HOME=${PREFIX_DIR}/cache_sub
+TODAY=$(date +%m_%d_%y)
+data_root=${DATA_ROOT:-${PREFIX_DIR}/datasets/text_to_image/gpic_latents/train} # TODO: change to your own
+dino_dir=${DINO_DIR:-${PREFIX_DIR}/datasets/text_to_image/gpic_latents_dino/train} # TODO: change to your own
 
 export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)
 export MASTER_PORT=29500
@@ -54,8 +57,8 @@ torchrun \
         --use-token-text-bridge \
         --token-layout row_major \
         --x0-cond-source x0 \
-        --data-root ${PREFIX_DIR}/datasets/text_to_image/gpic_latents/train \
-        --out-dir ${PREFIX_DIR}/BiB_results/06_29_26/gpic/mega_run_multi_ema \
+        --data-root ${data_root} \
+        --out-dir ${PREFIX_DIR}/BiB_results/${TODAY}/gpic/mega_run_multi_ema \
         --log-every 100 \
         --ckpt-every 10000 \
         --eval-every 10000 \
@@ -81,7 +84,7 @@ torchrun \
         --repa-image-warmup-steps 0 \
         --repa-image-layer 8 \
         --repa-phase equal \
-        --dino-dir ${PREFIX_DIR}/datasets/text_to_image/gpic_latents_dino/train \
+        --dino-dir ${dino_dir} \
         --time-sampler logit_normal \
         --time-sampler-logit-normal-mean 0.4 \
         --time-sampler-logit-normal-std 0.7 \

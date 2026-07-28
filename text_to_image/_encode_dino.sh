@@ -17,7 +17,7 @@ module load python
 module load conda
 conda activate dit_env
 
-export PREFIX_DIR=/pscratch/sd/g/gabeguo
+export PREFIX_DIR=/pscratch/sd/g/gabeguo # TODO: change to your own
 export HF_HOME=${PREFIX_DIR}/cache_sub
 export HF_TOKEN=$(cat "$HF_HOME/token" 2>/dev/null)
 export TORCH_HOME=${PREFIX_DIR}/cache_sub/torch # DINOv2 hub weights cache
@@ -30,7 +30,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 SRC=${PREFIX_DIR}/datasets/text_to_image/gpic_latents_flux/train
 DINO=${PREFIX_DIR}/datasets/text_to_image/gpic_latents_flux_dino/train
 
-cd ${PREFIX_DIR}/BiB/text_to_image
+# cd ${PREFIX_DIR}/BiB/text_to_image
 
 # Resume is driven by the per-shard dino_filled bitmaps (a row is skipped once
 # its bit is set), so on a requeue/crash it picks up where it left off, and the

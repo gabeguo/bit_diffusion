@@ -25,9 +25,10 @@
 
 set -euo pipefail
 
-PREFIX_DIR=/pscratch/sd/g/gabeguo
+PREFIX_DIR=/pscratch/sd/g/gabeguo # TODO: change to your own
+TODAY=$(date +%m_%d_%y)
 SUBMIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RESULTS_ROOT=${PREFIX_DIR}/BiB_results/editing_experiment/07_09_26
+RESULTS_ROOT=${PREFIX_DIR}/BiB_results/${TODAY}/editing_experiment
 LOG_DIR=${PREFIX_DIR}/BiB_results/slurm_logs
 
 export HF_HOME=${PREFIX_DIR}/cache_sub
@@ -49,7 +50,7 @@ NFE_BASE=${NFE_BASE:-250}
 VIZ_EVERY=${VIZ_EVERY:-10}
 WANDB_PROJECT=${WANDB_PROJECT:-bib-editing}
 WANDB_MODE=${WANDB_MODE:-online}
-DATA_ROOT=${DATA_ROOT:-${PREFIX_DIR}/datasets/text_to_image/gpic_latents_sd_test/TEST}
+DATA_ROOT=${DATA_ROOT:-${PREFIX_DIR}/datasets/text_to_image/gpic_latents_sd_test/TEST} # TODO: change to your own
 
 # ---- Job table: name | modality | forward-ckpt | reverse-ckpt -------------
 # Use "-" for an absent model.
