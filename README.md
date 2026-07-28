@@ -64,7 +64,7 @@ pip install torch torchvision
 pip install \
   diffusers transformers timm wandb \
   numpy pyarrow pillow tqdm matplotlib \
-  imageio imageio-ffmpeg \
+  imageio imageio-ffmpeg opencv-python-headless \
   torchmetrics torch-fidelity pycocoevalcap \
   huggingface-hub
 ```
