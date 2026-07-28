@@ -182,7 +182,7 @@ def ensure_shard(output_dir: Path, shard_id: int, shard_size: int,
     ensure_sized_file(paths["filled"], fill_bytes)
 
 class ShardWriter:
-    """Holds open memmaps for the current shard. Reopens on shard change.
+    """"""Holds open memmaps for the current shard. Reopens on shard change.
 
     To avoid torn writes across the (latents, text, filled) triple, we never
     set filled[i] = 1 in memory until flush() has durably persisted the
@@ -190,7 +190,7 @@ class ShardWriter:
     filled bits and msyncs the filled memmap last. As a result, any reader
     that observes filled[i] == 1 on disk can assume latents[i] and text[i]
     are also on disk (modulo the underlying device's write cache).
-    """
+    """"""
 
     def __init__(self, output_dir: Path, shard_size: int, store_logvar: bool):
         self.output_dir = output_dir
