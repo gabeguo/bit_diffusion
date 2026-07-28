@@ -1,3 +1,5 @@
+# NOTE: this is a legacy script from which we import a few functions.
+
 """
 Stream common-canvas/commoncatalog-cc-by-sa, encode images with SD-VAE-ft-mse and
 captions with Qwen3-Embedding-8B, and write the results to sharded numpy memmaps
@@ -64,7 +66,9 @@ from transformers import AutoModel, AutoTokenizer
 # Constants
 # ---------------------------------------------------------------------------
 
+"""
 DATASET_NAME = "common-canvas/commoncatalog-cc-by-sa"
+"""
 VAE_MODEL = "stabilityai/sd-vae-ft-mse"
 TEXT_MODEL = "Qwen/Qwen3-Embedding-8B"
 
@@ -72,6 +76,7 @@ IMAGE_SIZE = 256
 LATENT_SHAPE = (4, 32, 32)         # (C, H, W) for 256x256 with f8 KL VAE
 TEXT_DIM = 4096
 SD_LATENT_SCALE = 0.18215          # only used for the decode preview
+"""
 TEXT_MAX_TOKENS = 48
 
 CAPTION_FIELD = "blip2_caption"
@@ -80,12 +85,13 @@ URL_FIELD_CANDIDATES = ("url", "image_url", "photo_url", "flickr_url")
 ID_FIELD_CANDIDATES = ("photoid", "id", "key", "image_id")
 
 LOG = logging.getLogger("encode_cc")
+"""
 
 
 # ---------------------------------------------------------------------------
 # Config & hashing (so we refuse to resume across incompatible runs)
 # ---------------------------------------------------------------------------
-
+"""
 @dataclass
 class Config:
     output_dir: str
@@ -141,7 +147,7 @@ def shard_paths(output_dir: Path, shard_id: int) -> dict[str, Path]:
         "filled":  output_dir / f"filled_{shard_id:05d}.bin",  # uint8 bitmap
         "meta":    output_dir / f"meta_{shard_id:05d}.parquet",
     }
-
+"""
 
 def ensure_sized_file(path: Path, nbytes: int) -> None:
     lock_path = path.with_suffix(path.suffix + ".lock")
@@ -161,7 +167,7 @@ def ensure_sized_file(path: Path, nbytes: int) -> None:
 
         with open(path, "xb") as f:
             f.truncate(nbytes)
-
+"""
 def ensure_shard(output_dir: Path, shard_id: int, shard_size: int,
                  store_logvar: bool) -> None:
     paths = shard_paths(output_dir, shard_id)
@@ -271,7 +277,7 @@ def _pick_field(row: dict, candidates) -> Optional[object]:
         if k in row and row[k] is not None:
             return row[k]
     return None
-
+"""
 
 def _decode_and_crop(img_bytes: bytes, size: int,
                      min_res: int) -> Optional[np.ndarray]:
@@ -295,7 +301,7 @@ def _decode_and_crop(img_bytes: bytes, size: int,
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     return img
 
-
+"""
 def producer_loop(rank: int, world_size: int, cfg: Config,
                   start_source_cursor: int, extra_skip: int,
                   out_q: "mp.Queue[RawSample]",
@@ -411,7 +417,7 @@ def producer_loop(rank: int, world_size: int, cfg: Config,
             break
         except queue.Full:
             continue
-
+"""
 
 # ---------------------------------------------------------------------------
 # GPU worker
@@ -501,7 +507,7 @@ def encode_texts(
             raise ValueError(f"unsupported out_dtype: {out_dtype}")
     return embs
 
-
+"""
 def _rows_for_rank(total_rows: int, rank: int, world_size: int) -> int:
     if rank >= total_rows:
         return 0
@@ -896,3 +902,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+"""
