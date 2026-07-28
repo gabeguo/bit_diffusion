@@ -307,11 +307,11 @@ def producer_loop(rank: int, world_size: int, cfg: Config,
                   out_q: "mp.Queue[RawSample]",
                   fail_q: "mp.Queue[FailedSample]",
                   stop: "mp.Event") -> None:
-    """One producer process per rank.
+    """"""One producer process per rank.
 
     We partition the streaming dataset by rank up-front so each rank consumes
     only its own stream shard and does not scan every upstream row.
-    """
+    """"""
     try:
         ds = load_dataset(
             cfg.dataset_name, split=cfg.dataset_split, streaming=True,
@@ -522,7 +522,7 @@ def _rows_done_from_next_row(next_row: int, rank: int, world_size: int) -> int:
 
 def gpu_worker(rank: int, world_size: int, cfg: Config,
                extra_skip: int) -> None:
-    """One process per GPU. Owns its share of memmap rows."""
+    """"""One process per GPU. Owns its share of memmap rows.""""""
     torch.cuda.set_device(rank)
     device = torch.device(f"cuda:{rank}")
     is_main = (rank == 0)
@@ -819,7 +819,7 @@ def ensure_config_compatible(cfg: Config) -> None:
         os.replace(tmp, cfg_path)
 
 def load_rank_resume(cfg: Config, rank: int, world_size: int) -> tuple[int, int]:
-    """Returns (next_row, source_cursor) for a single rank."""
+    """"""Returns (next_row, source_cursor) for a single rank.""""""
     out = Path(cfg.output_dir)
     p = out / f"progress_rank{rank}.json"
     if not p.exists():
