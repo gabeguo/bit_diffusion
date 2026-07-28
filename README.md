@@ -1,5 +1,7 @@
 # Invertible Text–Image Diffusion Bridges
 
+*By [Gabe Guo](https://gabeguo.github.io/), [Elon Litman](https://elonlit.com/), [Thanawat Sornwanee](https://tsornwanee.github.io/), [Lutong Hao](https://lutong-hao.github.io/), [Jose Blanchet](https://joseblanchet.com/), [Stefano Ermon](https://cs.stanford.edu/~ermon/)*.
+
 Research code for bidirectional diffusion bridges between text and images, building on [ABC Diffusion](https://github.com/gabeguo/abc_diffusion).
 
 A single cross-attention Diffusion Transformer learns both:
@@ -237,3 +239,19 @@ This repository builds on:
 
 - [ABC Diffusion](https://github.com/gabeguo/abc_diffusion)
 - [DiT](https://github.com/facebookresearch/DiT)
+
+This material is based upon work supported by the U.S. Department of Energy, Office of Science, Office of Advanced Scientific Computing Research, Department of Energy Computational Science Graduate Fellowship under Award Number DE-SC0025528. This research used resources of the National Energy Research Scientific Computing Center (NERSC), a Department of Energy User Facility (projects m5319-2026, m1266-2026).
+
+## Citation
+
+```
+@article{guo2026bit,
+      title={There and Back Again: Bidirectional Diffusion Bridges for Multimodality Translation}, 
+      author={Gabe Guo, Elon Litman, Thanawat Sornwanee, Lutong Hao, Jose Blanchet, Stefano Ermon},
+      year={2026},
+      eprint={},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={}, 
+}
+```
