@@ -162,11 +162,15 @@ PYTHONPATH=.:.. torchrun --standalone --nproc-per-node=8 train.py \
 Checkpoint semantics are validated during `--eval-only`; incompatible model or
 bridge arguments are rejected.
 
+### Checkpoints
+
 Our checkpoints may also be referenced as:
 
 ```text
 hf://therealgabeguo/BiB_generative/path/to/checkpoint.pt
 ```
+
+Visit [https://huggingface.co/therealgabeguo/BiB_generative](https://huggingface.co/therealgabeguo/BiB_generative).
 
 ## Cross-modal editing
 
