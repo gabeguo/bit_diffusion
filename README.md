@@ -61,6 +61,8 @@ text_to_image/
 
 A CUDA-enabled PyTorch installation is required. Dependency versions are currently unpinned.
 
+Python 3.12.12
+
 ```bash
 pip install torch torchvision
 pip install \
