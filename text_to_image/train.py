@@ -877,8 +877,11 @@ def main() -> None:
         ckpt_dir = None
         eval_dir = None
 
-    # ---- Broadcast the output dir name from rank 0 so other ranks can write
-    #      barriers / paths if desired in the future.
+    # Every rank needs the same score-output path because score collection is a
+    # distributed collective, even though only rank 0 writes the resulting file.
+    eval_dir_holder = [str(eval_dir) if rank == 0 else None]
+    dist.broadcast_object_list(eval_dir_holder, src=0)
+    clip_scores_dir = Path(eval_dir_holder[0])
     dist.barrier()
 
     # ---- Model + EMA
@@ -1473,6 +1476,7 @@ def main() -> None:
             and (not args.no_forward) and (not bridge_config.image_as_noise):
               for cfg_scale in eval_cfg_scales:
                 for ode in ode_eval_flags:
+                  score_tag = f"step_{train_steps:07d}_cfg_{cfg_scale}_{'ode' if ode else 'sde'}"
                   fid_logs = compute_fid_distributed(
                     eval_model=ema, sde=sde, vae=vae,
                     val_ds=val_ds, eval_indices=fid_eval_indices,
@@ -1489,6 +1493,11 @@ def main() -> None:
                     x0_cond_source=args.x0_cond_source,
                     runtime_config=bridge_runtime,
                     compute_clipscore=not args.no_eval_clipscore,
+                    clip_scores_path=(
+                        clip_scores_dir / f"clip_scores_t2i_{score_tag}.json"
+                        if not args.no_eval_clipscore
+                        else None
+                    ),
                     eval_pg=eval_pg,
                   )
                   metric_logs.update(fid_logs)
@@ -1503,6 +1512,7 @@ def main() -> None:
             ):
               for cfg_scale in eval_cfg_scales:
                 for ode in ode_eval_flags:
+                  score_tag = f"step_{train_steps:07d}_cfg_{cfg_scale}_{'ode' if ode else 'sde'}"
                   text_logs = compute_text_decode_distributed(
                     eval_model=ema, sde=sde,
                     token_decoder=token_decoder, tokenizer=token_tokenizer,
@@ -1523,6 +1533,11 @@ def main() -> None:
                     genppl_batch_size=args.eval_genppl_batch_size,
                     include_padding_in_accuracy=args.eval_text_decode_include_padding_in_accuracy,
                     vae=vae,
+                    clip_scores_path=(
+                        clip_scores_dir / f"clip_scores_i2t_{score_tag}.json"
+                        if not args.no_eval_clipscore
+                        else None
+                    ),
                     eval_pg=eval_pg,
                   )
                   metric_logs.update(text_logs)

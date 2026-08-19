@@ -25,9 +25,11 @@ one that should log to wandb.
 
 from __future__ import annotations
 
+import json
 import math
 import warnings
 from contextlib import nullcontext
+from pathlib import Path
 from typing import Optional
 
 import torch
@@ -90,6 +92,59 @@ def _clip_score_manual(
     img_emb = img_emb / img_emb.norm(p=2, dim=-1, keepdim=True)
     txt_emb = txt_emb / txt_emb.norm(p=2, dim=-1, keepdim=True)
     return 100.0 * (img_emb * txt_emb).sum(dim=-1)
+
+
+def _save_distributed_clip_scores(
+    path: Optional[str | Path],
+    local_scores: list[float],
+    eval_indices: list[int],
+    rank: int,
+    world_size: int,
+    eval_pg,
+) -> None:
+    """Gather per-example scores in dataset-index order and save them on rank 0."""
+    if path is None:
+        return
+
+    gathered: list[dict | None] = [None] * world_size
+    dist.all_gather_object(
+        gathered,
+        {
+            "indices": eval_indices[rank::world_size],
+            "scores": local_scores,
+        },
+        group=eval_pg,
+    )
+    parts = [part for part in gathered if part is not None]
+
+    # Preserve the existing behavior when CLIP initialization is disabled or
+    # fails consistently across ranks: report no score and write no file.
+    if all(not part["scores"] for part in parts):
+        return
+    if any(len(part["indices"]) != len(part["scores"]) for part in parts):
+        raise RuntimeError("Missing CLIP scores on one or more evaluation ranks")
+
+    pairs = sorted(
+        (index, score)
+        for part in parts
+        for index, score in zip(part["indices"], part["scores"])
+    )
+    if len({index for index, _ in pairs}) != len(pairs):
+        raise RuntimeError("Duplicate evaluation indices in CLIP score output")
+
+    if rank == 0:
+        output_path = Path(path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(
+            json.dumps(
+                {
+                    "indices": [index for index, _ in pairs],
+                    "scores": [score for _, score in pairs],
+                },
+                indent=2,
+            )
+            + "\n"
+        )
 
 
 def _make_shard_loader(
@@ -259,6 +314,7 @@ def compute_fid_distributed(
     x0_cond_source: str = "x0",
     runtime_config: BridgeRuntimeConfig = BRIDGE_RUNTIME_PRESETS["sd"],
     compute_clipscore: bool = True,
+    clip_scores_path: Optional[str | Path] = None,
     eval_pg=None,
 ) -> dict[str, float]:
     """Sharded text->image FID over ``len(eval_indices)`` samples.
@@ -300,6 +356,7 @@ def compute_fid_distributed(
     clip_sum = 0.0
     clip_sum_sq = 0.0
     clip_n = 0.0
+    clip_scores_local: list[float] = []
 
     autocast_ctx = (
         torch.autocast(device_type="cuda", dtype=autocast_dtype)
@@ -352,6 +409,16 @@ def compute_fid_distributed(
                     clip_sum += float(scores.sum().item())
                     clip_sum_sq += float(scores.square().sum().item())
                     clip_n += float(len(caps))
+                    clip_scores_local.extend(scores.float().cpu().tolist())
+
+    _save_distributed_clip_scores(
+        clip_scores_path,
+        clip_scores_local,
+        eval_indices,
+        rank,
+        world_size,
+        eval_pg,
+    )
 
     # ``compute`` will all-reduce internal state across ranks.
     fid_value = fid.compute()
@@ -414,6 +481,7 @@ def compute_text_decode_distributed(
     genppl_batch_size: int = 16,
     include_padding_in_accuracy: bool = False,
     vae=None,
+    clip_scores_path: Optional[str | Path] = None,
     eval_pg=None,
 ) -> dict[str, float]:
     was_training = eval_model.training
@@ -444,6 +512,7 @@ def compute_text_decode_distributed(
     clip_sum = 0.0
     clip_sum_sq = 0.0
     clip_n = 0.0
+    clip_scores_local: list[float] = []
     # Stop-detection consistency: magnitude-based stop (truth) vs pad-id stop.
     stop_exact = 0.0      # examples where the two stop indices agree exactly
     stop_abs_diff = 0.0   # sum of |stop_norm - stop_pad| (in tokens)
@@ -545,6 +614,17 @@ def compute_text_decode_distributed(
                 clip_sum += float(scores.sum().item())
                 clip_sum_sq += float(scores.square().sum().item())
                 clip_n += float(len(pred_caps))
+                clip_scores_local.extend(scores.float().cpu().tolist())
+
+    _save_distributed_clip_scores(
+        clip_scores_path,
+        clip_scores_local,
+        eval_indices,
+        rank,
+        world_size,
+        eval_pg,
+    )
+
     # Gather caption pairs across ranks so CIDEr's corpus-level IDF is computed
     # over the FULL eval set (not per-rank shards), then score once. The result
     # is identical on every rank, so the SUM all-reduce below preserves the mean.
