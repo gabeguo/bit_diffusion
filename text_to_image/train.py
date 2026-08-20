@@ -87,7 +87,7 @@ def setup_ddp() -> tuple[int, int, int, dist.ProcessGroup]:
     collective fails fast (and the batch-script retry loop requeues). ``eval_pg``
     is a separate long-timeout group for eval/checkpoint barriers, where rank 0
     legitimately does minutes of solo work (sampling/decode/save) while the
-    other ranks wait at the barrier (20 min, dominated by the rank-0 eval
+    other ranks wait at the barrier (up to an hour, dominated by evaluation
     visualization).
     """
     # Resolve + set the GPU BEFORE init_process_group so we can pass an explicit
@@ -101,7 +101,7 @@ def setup_ddp() -> tuple[int, int, int, dist.ProcessGroup]:
         timeout=timedelta(minutes=5),
         device_id=torch.device(f"cuda:{local_rank}"),
     )
-    eval_pg = dist.new_group(timeout=timedelta(minutes=25))
+    eval_pg = dist.new_group(timeout=timedelta(minutes=60))
     rank = dist.get_rank()
     world_size = dist.get_world_size()
     return rank, world_size, local_rank, eval_pg

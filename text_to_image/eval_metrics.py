@@ -366,7 +366,7 @@ def compute_fid_distributed(
 
     n_generated_local = 0
     with _temporarily_swap_score_network(sde, eval_model), autocast_ctx:
-        for batch in tqdm(loader, desc="Computing FID"):
+        for batch in tqdm(loader, desc=f"Computing FID [rank {rank}]"):
             x_0, latent_gt, y, x_cond_0, x_cond_1 = prepare_bridge_batch(
                 batch,
                 device,
@@ -554,7 +554,7 @@ def compute_text_decode_distributed(
     with _temporarily_swap_score_network(sde, eval_model), autocast_ctx:
         all_ref_caps: list[list[str]] = []
         all_pred_caps: list[list[str]] = []
-        for batch in tqdm(loader, desc="Computing text decode"):
+        for batch in tqdm(loader, desc=f"Computing text decode [rank {rank}]"):
             latent = batch["latent"].to(device, non_blocking=True).float()
             token_ids = batch["text_token_ids"].to(device, non_blocking=True).long()
             token_mask = batch["text_token_mask"].to(device, non_blocking=True).bool()
