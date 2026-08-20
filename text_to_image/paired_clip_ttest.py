@@ -57,7 +57,7 @@ def main() -> None:
                 "mean_a": a.mean(),
                 "mean_b": b.mean(),
                 "mean_difference_a_minus_b": (a - b).mean(),
-                "std_difference_a_minus_b": (a - b).std(),
+                "std_difference_a_minus_b": (a - b).std(ddof=1),
                 "t_statistic": result.statistic,
                 "p_value": result.pvalue,
                 "alternative": args.alternative,
