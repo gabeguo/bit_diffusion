@@ -55,6 +55,14 @@ text_to_image/
     ├── encode_global_text.py       # *(not extensively tested)*
     ├── latent_dataset.py           # Dataset loading code
     └── encode_common_catalog.py    # *legacy code*
+
+state_fate/
+├── train.py                # LARRY clone-paired bridge training
+├── evaluate.py             # Endpoint, cycle, MMD, and lineage evaluation
+├── baselines.py            # Flow, endpoint-regression, and DDPM baselines
+├── models/                 # Vector MLP and DiT bridge models
+├── data_utils/             # LARRY download and preprocessing
+└── scripts/                # Local, Perlmutter, and Atlas launchers
 ```
 
 ## Installation
@@ -71,6 +79,13 @@ pip install \
   imageio imageio-ffmpeg opencv-python-headless \
   torchmetrics torch-fidelity pycocoevalcap \
   huggingface-hub
+```
+
+The LARRY state-fate benchmark has a smaller, benchmark-specific dependency
+set:
+
+```bash
+pip install -r state_fate/requirements.txt
 ```
 
 ## Data preparation
@@ -234,6 +249,15 @@ PYTHONPATH=.:.. python perturbation_slerp_experiment.py \
 ```
 
 Both angular perturbations and LLM-generated caption rewrites are supported.
+
+## LARRY state-fate benchmark
+
+`state_fate/` applies the same bridge utilities to clone-paired day-2 progenitor
+and day-6 descendant states from the LARRY hematopoiesis dataset. It includes
+data preparation, vector models, distributed training, baselines, metrics, and
+trajectory plots.
+
+See [`state_fate/README.md`](state_fate/README.md) for the end-to-end workflow.
 
 ## Acknowledgements
 
