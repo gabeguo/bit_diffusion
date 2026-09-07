@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+data/
+runs/
+*.pt
+*.png
+*.gif
+*.mp4
+*.out
