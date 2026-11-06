@@ -138,18 +138,49 @@ class FlowTokGenerator:
         self.clip = clip_encoder.to(device).eval().requires_grad_(False)
         self.clip_tokenizer = open_clip.get_tokenizer("ViT-L-14-336")
 
-    def _encode_text(self, captions):
+    def _token_states(self, tokens, batch_first: bool):
         clip = self.clip
-        tokens = self.clip_tokenizer(captions).to(self.device)
         cast_dtype = clip.transformer.get_cast_dtype()
         x = clip.token_embedding(tokens).to(cast_dtype) + clip.positional_embedding.to(cast_dtype)
-        # FlowTok sets batch_first=False and feeds LND; feeding the layout the
-        # installed open_clip expects is the same computation on any version.
-        if getattr(clip.transformer, "batch_first", False):
+        if batch_first:
             x = clip.transformer(x, attn_mask=clip.attn_mask)
         else:
             x = clip.transformer(x.permute(1, 0, 2), attn_mask=clip.attn_mask).permute(1, 0, 2)
         return clip.ln_final(x)
+
+    def _matches_encode_text(self, tokens, states) -> bool:
+        """Pool our per-token states like open_clip does and compare."""
+        clip = self.clip
+        if getattr(clip, "text_pool_type", "argmax") != "argmax":
+            return True  # no comparable reference; trust the layout choice
+        pooled = states[torch.arange(states.shape[0], device=states.device), tokens.argmax(dim=-1)]
+        proj = clip.text_projection
+        pooled = proj(pooled) if isinstance(proj, torch.nn.Module) else pooled @ proj
+        ref = clip.encode_text(tokens)
+        return torch.allclose(pooled.float(), ref.float(), rtol=1e-2, atol=1e-2)
+
+    def _encode_text(self, captions):
+        """CLIP token states (B, 77, 768), as FlowTok's ``ode_fm_solver_sample``.
+
+        FlowTok sets ``transformer.batch_first = False`` and feeds sequence-first
+        input, which matches only open_clip 2.2x. open_clip 3/4 drop the flag and
+        always take batch-first input. We use the layout the installed version
+        expects and verify it once against its own ``encode_text``.
+        """
+        tokens = self.clip_tokenizer(captions).to(self.device)
+        if getattr(self, "_batch_first", None) is None:
+            preferred = bool(getattr(self.clip.transformer, "batch_first", True))
+            for layout in (preferred, not preferred):
+                try:
+                    states = self._token_states(tokens, layout)
+                except RuntimeError:
+                    continue
+                if self._matches_encode_text(tokens, states):
+                    self._batch_first = layout
+                    return states
+            raise RuntimeError("Could not match open_clip's encode_text with either token layout; "
+                               f"check the installed open_clip version ({getattr(self.clip, '__module__', '?')}).")
+        return self._token_states(tokens, self._batch_first)
 
     @torch.no_grad()
     def generate(self, captions):
