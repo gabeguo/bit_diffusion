@@ -48,6 +48,7 @@ Run from text_to_image with PYTHONPATH=.:.. (same as train.py / editing_experime
 from __future__ import annotations
 
 import argparse
+import json
 import math
 from pathlib import Path
 
@@ -67,7 +68,21 @@ from token_bridge import (
 from tqdm import tqdm
 
 
-def infer_noise_samples(x0, x1, y, nfe, fwd, device):
+def forward_score(fwd, x, t, y, x_cond, cfg_scale=0.0):
+    """Forward-time drift network output, guided by Eq. 10 when ``cfg_scale > 0``.
+
+    ``cfg_scale == 0`` keeps the exact original call (and RNG stream); a positive
+    scale applies ``(1 + w) f(x, t; x_0) - w f(x, t; null)``, the same guidance
+    as ``SDE.dX_t``. Backsolving and replay must use the SAME drift so that the
+    lambda = 0 replay still reproduces the source latent (Eq. 61).
+    """
+    if cfg_scale > 0:
+        return fwd.net.forward_with_cfg(x=x, t=t, y=y, x_cond=x_cond,
+                                        reverse=False, cfg_scale=cfg_scale)
+    return fwd.net(x=x, t=t, y=y, x_cond=x_cond, reverse=False)
+
+
+def infer_noise_samples(x0, x1, y, nfe, fwd, device, cfg_scale=0.0):
     assert fwd.sde.A == 0
     all_ts = torch.linspace(0.0, 1.0, nfe+1, device=device)
     x_prev = x0
@@ -82,12 +97,13 @@ def infer_noise_samples(x0, x1, y, nfe, fwd, device):
             t_next=torch.full((x0.shape[0],), 1.0, device=device),
         )
         curr_dX = x_t - x_prev
-        curr_score = fwd.net(
-            x=x_prev, 
-            t=all_ts[i-1].expand(x0.shape[0]), 
-            y=y, 
-            x_cond=x0, 
-            reverse=False, 
+        curr_score = forward_score(
+            fwd,
+            x=x_prev,
+            t=all_ts[i-1].expand(x0.shape[0]),
+            y=y,
+            x_cond=x0,
+            cfg_scale=cfg_scale,
         )
         curr_sigma = fwd.sde.sigma(all_ts[i-1])
         dt = all_ts[i] - all_ts[i-1]
@@ -98,17 +114,18 @@ def infer_noise_samples(x0, x1, y, nfe, fwd, device):
     assert retval.shape == (nfe, x0.shape[0], x0.shape[1], x0.shape[2], x0.shape[3])
     return retval
 
-def simulate_with_fixed_noise(x0, all_dB, y, nfe, fwd, device):
+def simulate_with_fixed_noise(x0, all_dB, y, nfe, fwd, device, cfg_scale=0.0):
     assert fwd.sde.A == 0
     all_ts = torch.linspace(0.0, 1.0, nfe+1, device=device)
     x_prev = x0
     for i in range(len(all_ts) - 1):
-        curr_score = fwd.net(
+        curr_score = forward_score(
+            fwd,
             x=x_prev,
             t=all_ts[i].expand(x0.shape[0]),
             y=y,
             x_cond=x0,
-            reverse=False,
+            cfg_scale=cfg_scale,
         )
         curr_sigma = fwd.sde.sigma(all_ts[i])
         dt = all_ts[i+1] - all_ts[i]
@@ -419,12 +436,13 @@ def generate_row(
     if infer_noise:
         with autocast:
             all_dB = infer_noise_samples(
-                x0=slerp_texts[0], 
-                x1=img, 
-                y=y, 
-                nfe=nfe, 
-                fwd=fwd, 
-                device=img.device
+                x0=slerp_texts[0],
+                x1=img,
+                y=y,
+                nfe=nfe,
+                fwd=fwd,
+                device=img.device,
+                cfg_scale=cfg_scale,
             )
     for j in range(S):
         _reseed(seed_chunk)                          # identical draw sequence per j
@@ -440,12 +458,13 @@ def generate_row(
             if infer_noise:
                 assert t_from == 0.0
                 out_j = simulate_with_fixed_noise(
-                    x0=x_start, 
+                    x0=x_start,
                     all_dB=all_dB,
-                    y=y, 
-                    nfe=nfe, 
-                    fwd=fwd, 
+                    y=y,
+                    nfe=nfe,
+                    fwd=fwd,
                     device=img.device,
+                    cfg_scale=cfg_scale,
                 )
             else:
                 out_j = _run(fwd, fwd.net, x_start, t_from, 1.0, nfe,
@@ -493,6 +512,25 @@ def save_panel(images_uint8, captions, mean_angle: float, alpha: float, out_path
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=140, bbox_inches="tight")
     plt.close(fig)
+
+
+def write_json_atomic(path: Path, value) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(value, indent=2, default=str) + "\n")
+    tmp.replace(path)
+
+
+def save_row_data(row_dir: Path, images_uint8, captions, source_uint8, meta: dict) -> None:
+    """Raw per-row artifacts for ``editing_figure.py``: one PNG per slerp column
+    (``col{j}.png``), the VAE-decoded source image (``source.png``), and
+    ``meta.json`` with the decoded column captions and run settings."""
+    from PIL import Image
+    row_dir.mkdir(parents=True, exist_ok=True)
+    for j in range(images_uint8.shape[0]):
+        Image.fromarray(images_uint8[j].permute(1, 2, 0).numpy()).save(row_dir / f"col{j}.png")
+    Image.fromarray(source_uint8.permute(1, 2, 0).numpy()).save(row_dir / "source.png")
+    write_json_atomic(row_dir / "meta.json", {**meta, "num_columns": int(images_uint8.shape[0])})
 
 
 # ---------------------------------------------------------------------------
@@ -555,6 +593,12 @@ def run(args):
     )
     out_dir = Path(args.out)
     autocast = torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+    infer_cfg_scale = args.cfg_scale if args.infer_cfg_scale is None else args.infer_cfg_scale
+    print(f"[perturb-slerp] cfg_scale={args.cfg_scale} (generation/backsolve) "
+          f"infer_cfg_scale={infer_cfg_scale} (image->text)")
+    # A complete manifest marks a finished run; drop a stale one before starting.
+    manifest_path = out_dir / "manifest.json"
+    manifest_path.unlink(missing_ok=True)
 
     # Collect the first ``num_images`` pairs whose caption is short enough
     # (token length, incl. special tokens, capped at token_seq_len by the dataset).
@@ -569,6 +613,7 @@ def run(args):
               f"<= {args.max_token_length} (asked for {args.num_images})")
     n = len(eligible)
 
+    completed = []
     for bstart in tqdm(range(0, n, args.batch_size), total=math.ceil(n / args.batch_size)):
         idxs = eligible[bstart:bstart + args.batch_size]
         items = [ds[i] for i in idxs]
@@ -582,7 +627,7 @@ def run(args):
         if args.text_source == "image":
             _reseed(args.seed + bstart)
             inf_flat, inf_mask, inf_ids = infer_text_from_image(
-                rev, img, y, nfe=args.infer_nfe, cfg_scale=args.cfg_scale,
+                rev, img, y, nfe=args.infer_nfe, cfg_scale=infer_cfg_scale,
                 vocab_table=vocab_table, token_scale=token_scale, config=config,
                 autocast=autocast,
             )
@@ -642,13 +687,45 @@ def run(args):
                     vae, outs[:, bi], latent_scale=runtime.latent_scale,
                     latent_shift=runtime.latent_shift, to_cpu=True,
                 )
+                source_uint8 = decode_latents(
+                    vae, img[bi:bi + 1], latent_scale=runtime.latent_scale,
+                    latent_shift=runtime.latent_shift, to_cpu=True,
+                )[0]
                 caps = decode_texts(slerp_texts[:, bi], text_model.token_decoder,
                                     text_model.tokenizer, token_scale, config)
             save_panel(imgs_uint8, caps, mean_angles[bi], args.alpha,
                        out_dir / f"panel_img{i:04d}.png",
                        orig_caption=(orig_captions[bi] if args.perturb_mode == "llm" else None),
                        new_caption=new_captions[bi])
+            # Relative latent error of the lambda=0 replay. With --infer-noise and
+            # no --init-t, Eq. 61 makes this a numerical-precision check (~0).
+            recon = (outs[0, bi] - img[bi].float()).norm() / img[bi].float().norm().clamp_min(1e-12)
+            save_row_data(
+                out_dir / "rows" / f"img{i:04d}", imgs_uint8, caps, source_uint8,
+                meta={
+                    "dataset_index": int(i),
+                    "source_caption": orig_captions[bi],
+                    "edited_caption": new_captions[bi],
+                    "column_captions": caps,
+                    "slerp_lambdas": torch.linspace(0.0, 1.0, int(args.num_slerp)).tolist(),
+                    "mean_angle_rad": mean_angles[bi],
+                    "lambda0_relative_latent_error": float(recon),
+                    "cfg_scale": args.cfg_scale,
+                    "infer_cfg_scale": infer_cfg_scale,
+                },
+            )
+            completed.append(int(i))
             print(f"[perturb-slerp] wrote {out_dir / f'panel_img{i:04d}.png'}")
+
+    write_json_atomic(manifest_path, {
+        "complete": True,
+        "num_completed": len(completed),
+        "completed_indices": completed,
+        "cfg_scale": args.cfg_scale,
+        "infer_cfg_scale": infer_cfg_scale,
+        "args": vars(args),
+    })
+    print(f"[perturb-slerp] wrote {manifest_path}")
 
 
 def parse_args():
@@ -691,7 +768,12 @@ def parse_args():
     p.add_argument("--infer-noise", action="store_true", default=False,
                    help="If set, use the inferred noise to simulate the generation process.")
     p.add_argument("--nfe", type=int, default=250, help="Euler-Maruyama steps for generation.")
-    p.add_argument("--cfg-scale", type=float, default=0.0)
+    p.add_argument("--cfg-scale", type=float, default=0.0,
+                   help="Eq. 10 guidance for text->image generation. With --infer-noise it is "
+                        "applied identically in noise backsolving and replay.")
+    p.add_argument("--infer-cfg-scale", type=float, default=None,
+                   help="(--text-source image) Eq. 11 guidance for image->text inference; "
+                        "defaults to --cfg-scale.")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="cuda")
     p.add_argument("--out", default="perturb_slerp_results",

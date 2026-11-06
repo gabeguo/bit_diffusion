@@ -269,6 +269,13 @@ See [`text_to_image/BIT_ABLATIONS.md`](text_to_image/BIT_ABLATIONS.md) for
 train-and-evaluate launchers comparing a unified bidirectional BIT with the
 existing specialists, and fixed random token embeddings with Qwen embeddings.
 
+## ICLR rebuttal experiments
+
+[`text_to_image/REBUTTAL_EXPERIMENTS.md`](text_to_image/REBUTTAL_EXPERIMENTS.md)
+describes `queue_rebuttal_experiments.sh`, which queues every rebuttal
+experiment in Slurm with one command, skipping any that already have results.
+The matching LaTeX is in [`rebuttal_experimental_description/`](rebuttal_experimental_description/).
+
 ## Acknowledgements
 
 This repository builds on:

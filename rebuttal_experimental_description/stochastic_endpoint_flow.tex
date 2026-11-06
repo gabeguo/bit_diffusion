@@ -1,0 +1,34 @@
+% Reviewer 6E8U (W4): controlled flow ODE with stochastic endpoint noise injection.
+% Code: --flow-text-sigma / --flow-image-sigma (sde_utils/sde.py, FLOW_MATCHING.md),
+% launched via _sbatch_flow.sh. Fill \tbd{} from <flow root>/*/eval/eval_metrics.json.
+\paragraph{Flow with stochastic endpoints.}\label{app:stochastic-flow}
+Deterministic data-to-data flows such as CrossFlow and FlowTok get sampling diversity by
+making the source endpoint stochastic. To test this strategy under our data,
+architecture, and budget, we add Gaussian noise to the source endpoint
+\citep{albergo2024stochastic}: $\tilde x_0 = x_0 + \sigma_{\mathrm{text}}\,\epsilon$ for
+T2I (and analogously $\tilde x_1 = x_1+\sigma_{\mathrm{image}}\,\epsilon$ for I2T). We
+train with the linear interpolant $x_t=(1-t)\tilde x_0+t x_1$ and velocity target
+$x_1-\tilde x_0$, using the same noise draw in both. The network cross-attends to the
+\emph{clean} source endpoint and is trained with conditioning dropout $0.3$, so CFG can
+be applied. At inference, the source is perturbed once and the ODE is integrated with
+500 Euler steps. We train one model per direction with $\sigma=0.01$ in the scaled bridge
+space. All other hyperparameters match Table~1 (DiTXA-L/2, 200K steps, batch 512,
+image REPA).
+
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{lcccc}
+    \toprule
+    Method & FID ($\downarrow$) & CLIP T2I ($\uparrow$) & Gen PPL ($\downarrow$) & CLIP I2T ($\uparrow$) \\
+    \midrule
+    \BIT{} & 6.23 & 27.10 & 123.4 & 26.99 \\
+    Diffusion (ablate data end) & 5.73 & 27.13 & 178.2 & 26.42 \\
+    Flow (ablate stochasticity) & 279.13 & 20.13 & 169.2 & 27.25 \\
+    Flow, stochastic endpoint ($\sigma=0.01$) & \tbd & \tbd & \tbd & \tbd \\
+    \bottomrule
+  \end{tabular}
+  \caption{\textbf{Table~1 with a stochastic-endpoint flow baseline} (500 steps,
+    $\omega=0$; T2I at 50K and I2T at 10K held-out samples).}
+  \label{tab:stochastic-flow}
+\end{table}

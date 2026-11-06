@@ -1,0 +1,25 @@
+% Section 6.3, Table 2 with the FlowTok-XL and CrossFlow rows (Reviewer 6E8U).
+% Existing rows are copied from the submitted draft. Fill each \tbd{} from
+%   $RESULTS_ROOT/external/{flowtok_xl,crossflow_256_clip}/results.json
+% (keys "fid" and "clipscore_t2i").
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{lcccc}
+    \toprule
+    Method & FID ($\downarrow$) & CLIP T2I ($\uparrow$) & Gen PPL ($\downarrow$) & CLIP I2T ($\uparrow$) \\
+    \midrule
+    \BIT{} $\omega=0.0$ & 4.39 & 27.75 & 78.1 & 29.4 \\
+    \BIT{} $\omega=0.5$ & \textbf{2.54} & \textbf{28.80} & \textbf{61.1} & \textbf{29.5} \\
+    \midrule
+    Qwen-3-VL-4B-Instruct & n/a & n/a & 37.7 & 31.9 \\
+    Stable Diffusion 1.5 & 9.92 & 33.15 & n/a & n/a \\
+    FlowTok-XL & \tbd & \tbd & n/a & n/a \\
+    CrossFlow & \tbd & \tbd & n/a & n/a \\
+    \bottomrule
+  \end{tabular}
+  \caption{\textbf{Impact of CFG, and Comparison to Foundation Models and Data-to-Data Flows.}
+    We use 500 SDE steps for \BIT{}. External models use their released samplers and settings
+    (App.~\ref{app:external-baselines}); FlowTok-XL and CrossFlow release no image-to-text checkpoints.}
+  \label{tab:foundation}
+\end{table}

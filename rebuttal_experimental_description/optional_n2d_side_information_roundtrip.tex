@@ -1,0 +1,12 @@
+% OPTIONAL (opt-in key roundtrip_n2d_cond), Reviewer 4qvB W1: round trip against a
+% noise-to-data sampler that RETAINS cross-modal side information, i.e. the setting
+% where Theorem 3 gives no ordering. Code: editing_experiment.py mode n2d_two.
+\paragraph{Round trip with retained side information.}\label{app:n2d-side-info}
+Theorem~3 compares \BIT{} with a noise-to-data bridge whose state alone carries the source.
+It says nothing once the noise-to-data sampler also keeps the prompt as side information.
+We therefore also evaluate a noise-to-data baseline that rebuilds this side information
+from the source. For an image source, the noise-to-text model first infers a caption
+(250 steps, snapped to the vocabulary table). The image is then corrupted analytically
+to time $t_\rho$, and the noise-to-image model restores it \emph{conditioned on the
+inferred caption}. A text source is handled symmetrically. We use $\omega\in\{0,0.5\}$ and
+otherwise the protocol of Fig.~3.

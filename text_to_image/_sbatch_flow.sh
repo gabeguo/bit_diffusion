@@ -63,6 +63,13 @@ if [[ "$mode" == eval && -z "${CHECKPOINT:-}" ]]; then
   export CHECKPOINT
   echo "=== resolved CHECKPOINT=$CHECKPOINT ==="
 fi
+# Optional guard (set by queue_rebuttal_experiments.sh): refuse to evaluate a
+# partial run, e.g. when training hit its wall time before the final step.
+if [[ "$mode" == eval && -n "${REQUIRE_STEP:-}" ]]; then
+  printf -v required 'step_%07d.pt' "$REQUIRE_STEP"
+  [[ "$(basename "$CHECKPOINT")" == "$required" ]] || {
+    echo "CHECKPOINT=$CHECKPOINT is not $required; training has not finished" >&2; exit 2; }
+fi
 
 cd "$SLURM_SUBMIT_DIR"
 
