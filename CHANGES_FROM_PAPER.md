@@ -34,3 +34,30 @@ Reference draft: [arXiv:2608.27885](https://arxiv.org/abs/2608.27885).
   parameter-count qualifications, scaling, and existing specialist checkpoint
   references are in `text_to_image/BIT_ABLATIONS.md`. These are additional
   experimental controls, not reported results or changes to the BIT objective.
+- ICLR rebuttal additions, built on
+  `09-21-2026/claude/multi-node-flow-launchers` at `fd9a74b` (protocols in
+  `text_to_image/REBUTTAL_EXPERIMENTS.md`, LaTeX in
+  `rebuttal_experimental_description/`). No reported number changes:
+  - **New Table 2 rows (§6.3):** FlowTok-XL and CrossFlow (256 px, CLIP, DiMR),
+    from their released checkpoints and samplers (pinned commits). Released
+    settings: 20 Euler steps with guidance 2.0, and 50 steps with 7.0. Scoring
+    uses BIT's held-out GPIC protocol: the same 50K captions, SD-VAE reference
+    images, FID-2048, and CLIP ViT-B/16. FlowTok's 512 px outputs are resized
+    to 256 px. Their guidance `s` equals BIT `omega = s - 1`. I2T is n/a
+    because no I2T checkpoints are released.
+  - **Guided variants of Fig. 3 and Fig. 5 (ω = 0.5):** the paper uses ω = 0.
+    In the round trip, guidance only affects the endpoint-conditioned
+    corruption leg; restoration is state-only, so ω is a no-op there. For
+    editing, `perturbation_slerp_experiment.py` previously ignored
+    `--cfg-scale` when `--infer-noise` was on. It now applies the Eq. 10 drift
+    in both backsolving (Eq. 61) and replay, which keeps the λ = 0 replay exact.
+    At ω = 0 the calls and RNG stream are unchanged. New `--infer-cfg-scale` defaults to
+    `--cfg-scale`, which preserves the old image→text behavior.
+  - `editing_experiment.py`, `n2d_two` mode only (not used in the paper): with
+    `--proportional-nfe`, the cross-modal inference leg now uses the full
+    `--infer-nfe` instead of `--infer-nfe` × corruption fraction. That leg
+    always traverses the whole bridge.
+  - Bookkeeping only, no effect on results: `train.py --eval-only` also writes
+    `eval/eval_metrics.json`. `_launch_bit_bidirectional.sh` skips finished
+    phases, and `_sbatch_flow.sh` can refuse a partial checkpoint
+    (`REQUIRE_STEP`).

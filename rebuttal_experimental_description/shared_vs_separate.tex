@@ -1,0 +1,35 @@
+% Reviewers xYk4 (W2) and 6E8U (W2): controlled shared-versus-separate comparison.
+% Code: text_to_image/_launch_bit_bidirectional.sh (see BIT_ABLATIONS.md).
+% Fill \tbd{} from $BIDIR_OUT/eval_{200000,400000}/*/eval/eval_metrics.json
+% (keys eval/fid_cfg_0.0_sde, eval/fid/clipscore_t2i_cfg_0.0_sde,
+%  eval/text_decode/genppl_cfg_0.0_sde, eval/text_decode/clipscore_i2t_cfg_0.0_sde).
+\paragraph{Shared versus separate models.}\label{app:shared-vs-separate}
+To isolate the effect of joint training, we train one DiTXA-L/2 on both directions with
+the controlled recipe of Table~1 (App.~G): the same data, periodic SDE, batch size 512,
+learning-rate schedule, EMA, image REPA, and conditioning dropout. The only change is
+that both directional losses are enabled. Each optimizer step sums the T2I and I2T losses
+on the same batch. We evaluate this shared model with the Table~1 protocol at two
+budgets. At \emph{200K} steps it matches the specialists' combined forward/backward
+compute and the number of training examples each direction sees. At \emph{400K} steps it
+matches the specialists' combined number of optimizer steps and sampled image--caption
+pairs, at about twice their combined compute. The shared model has two direction-specific
+conditioning embedders and REPA heads, a difference of under $0.5\%$ of the
+${\sim}700$M trunk parameters. It saves about half the storage of deploying two
+specialists.
+
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{lccccc}
+    \toprule
+    Model & Steps & FID ($\downarrow$) & CLIP T2I ($\uparrow$) & Gen PPL ($\downarrow$) & CLIP I2T ($\uparrow$) \\
+    \midrule
+    \BIT{}, separate (Table~1) & $2\times200$K & 6.23 & 27.10 & 123.4 & 26.99 \\
+    \BIT{}, shared & 200K & \tbd & \tbd & \tbd & \tbd \\
+    \BIT{}, shared & 400K & \tbd & \tbd & \tbd & \tbd \\
+    \bottomrule
+  \end{tabular}
+  \caption{\textbf{One bidirectional network versus two specialists} (controlled setting,
+    500 SDE steps, $\omega=0$, T2I at 50K and I2T at 10K held-out samples).}
+  \label{tab:shared-vs-separate}
+\end{table}

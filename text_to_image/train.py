@@ -1564,6 +1564,21 @@ def main() -> None:
                     for k, v in metric_logs.items()
                 )
                 print(f"eval step {train_steps:>7d} | {msg}")
+                if args.eval_only:
+                    # On-disk copy of the held-out metrics: a completion marker for
+                    # launchers (e.g. queue_rebuttal_experiments.sh) and table input.
+                    _metrics_path = eval_dir / "eval_metrics.json"
+                    _metrics_path.with_suffix(".json.tmp").write_text(json.dumps({
+                        "step": int(train_steps),
+                        "checkpoint": str(args.resume),
+                        "data_root": str(args.data_root),
+                        "val_fraction": args.val_fraction,
+                        "seed": args.seed,
+                        "eval_cfg_scales": list(eval_cfg_scales),
+                        "metrics": metric_logs,
+                    }, indent=2, default=float) + "\n")
+                    _metrics_path.with_suffix(".json.tmp").replace(_metrics_path)
+                    print(f"[eval-only] wrote {_metrics_path}")
             dist.barrier(group=eval_pg)
 
         # ---- Post eval/ckpt housekeeping

@@ -1,0 +1,49 @@
+% Reviewer 4qvB, Q2: round-trip variation (Fig. 3) and image editing (Fig. 5)
+% with classifier-free guidance omega = 0.5. Code: editing_experiment.py
+% (--cfg-scale), perturbation_slerp_experiment.py (--cfg-scale), editing_figure.py.
+\paragraph{Guidance in round-trip variation and editing.}\label{app:cfg-roundtrip}
+Figures~3--5 use $\omega=0$, so every drift is a learned approximation of the analyzed
+population drift. The guided drift of Eqs.~\eqref{eq:cfg-forward}--\eqref{eq:cfg-reverse}
+is a heuristic outside that analysis. To check whether these capabilities come from the
+bridge or from the heuristic, we rerun both experiments with $\omega=0.5$, the guidance
+used in Fig.~2 and Table~\ref{tab:foundation}. Everything else is unchanged: checkpoints,
+held-out samples, seeds, step sizes, and the numbers of sources and variations.
+
+\textbf{Round trip (Alg.~1).} Guidance only enters the endpoint-conditioned leg, i.e.\ the
+corruption from the source toward the other modality. The restoration leg uses the
+state-only drift ($x_{\mathrm{cond}}=\varnothing$), for which Eq.~\eqref{eq:cfg-forward}
+reduces to the unguided drift for every $\omega$. The noise-to-data baseline restores
+with an unconditional model, and the flow baseline uses a single unconditional field, so
+neither depends on $\omega$. We report fidelity and diversity for \BIT{} at $\omega=0.5$
+next to the $\omega=0$ curves of Fig.~3 (Fig.~\ref{fig:roundtrip-cfg}).
+
+\textbf{Editing (Alg.~2).} We apply $\omega=0.5$ to the image-to-text inference
+(Eq.~\eqref{eq:cfg-reverse}) and to the text-to-image drift. For the latter, the same
+guided drift $\mathbf{f}_\theta(\cdot,\cdot,x_0^{(0)},\omega)$ replaces $s_\theta$ in both
+noise backsolving (Eq.~61) and replay (Alg.~2, line~10). Because both steps use the same
+drift, the replay at $\lambda=0$ still reconstructs the source latent up to numerical
+precision, so the structure-preserving construction is unchanged. The LLM edit is applied
+to the caption inferred at $\omega=0.5$, so captions can differ from Fig.~5.
+Fig.~\ref{fig:editing-cfg} shows the same four source images as Fig.~5.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/rebuttal/compare_image.png}\\
+  \includegraphics[width=\linewidth]{figures/rebuttal/compare_text.png}
+  \caption{\textbf{Cross-modal round-trip stochastic variation with guidance.}
+    \BIT{} with $\omega=0.5$ on the corruption leg (Alg.~1; the restoration leg is
+    state-only and unaffected by $\omega$), overlaid on the $\omega=0$ results of
+    Fig.~3. Same 500 sources, 8 variations each, and $dt=0.004$.}
+  \label{fig:roundtrip-cfg}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/rebuttal/figure5_cfg0.5.pdf}
+  \caption{\textbf{Image editing via text bridge with guidance ($\omega=0.5$).}
+    Same model, source images, and procedure as Fig.~5 (Alg.~2, $N=400$, five
+    interpolation points), with $\omega=0.5$ for image-to-text inference and for both
+    noise backsolving and replay. The leftmost column ($\lambda=0$) reconstructs the
+    source image.}
+  \label{fig:editing-cfg}
+\end{figure}

@@ -37,6 +37,9 @@ def _series(result: dict):
 def _convert_mode_name(mode_name: str) -> str:
     if "data2data" in mode_name:
         return "BIT"
+    elif mode_name == "n2d_two":
+        # restores conditionally on the cross-modal context inferred by a second model
+        return "Noise-to-Data (inferred cond.)"
     elif "n2d" in mode_name:
         return "Noise-to-Data"
     return mode_name
@@ -55,6 +58,9 @@ def _label(result: dict, include_ckpt: bool = False) -> str:
         n_str = f"n={ns.pop()}" if len(ns) == 1 else (f"n~{min(ns)}" if ns else "")
     tail = f" ({n_str})" if n_str else ""
     mode_name = _convert_mode_name(m['mode'])
+    # Distinguish guided runs in overlays; unguided (w = 0) labels are unchanged.
+    if m.get("cfg_scale", 0.0):
+        mode_name = f"{mode_name}, \u03c9={m['cfg_scale']:g}"
     if include_ckpt:
         return f"{mode_name} ({Path(ck).parent.parent.name or Path(ck).name}){tail}"
     else:

@@ -484,7 +484,9 @@ def run(args):
                     args.noise_nfe, 
                     f - f_prev if args.cache_perturbed_samples else f
                 ),
-                restore_nfe=_scale_nfe(args.restore_nfe, f), infer_nfe=_scale_nfe(args.infer_nfe, f))
+                # Cross-modal inference (n2d_two) always traverses the WHOLE bridge,
+                # so its constant-dt count is the full base, not base * f.
+                restore_nfe=_scale_nfe(args.restore_nfe, f), infer_nfe=args.infer_nfe)
             with autocast:
                 noised, out = restore(mode=mode, fwd=fwd, rev=rev, modality=args.generate_modality,
                                       src_img=src_img, src_text=src_text, y=y, t_stop=t_stop, ctx=fctx,
@@ -618,8 +620,9 @@ def parse_args():
     p.add_argument("--infer-nfe", type=int, default=100,
                    help="NFE for cross-modal inference (two-model noise-to-data).")
     p.add_argument("--proportional-nfe", action="store_true",
-                   help="Scale the noising/restoration/inference NFE by the corruption fraction "
-                        "(base NFE = count per full unit of travel), holding the step size dt constant across fractions.")
+                   help="Scale the noising/restoration NFE by the corruption fraction "
+                        "(base NFE = count per full unit of travel), holding the step size dt constant across fractions. "
+                        "Cross-modal inference (n2d_two) always uses the full --infer-nfe.")
     p.add_argument("--cache-perturbed-samples", action="store_true", default=False,
                    help="Cache the perturbed samples for the next fraction. This can reduce the total NFE in the data-to-data path. Only supported for data2data_single and data2data_two modes when proportional_nfe is enabled.")
     p.add_argument("--cfg-scale", type=float, default=0.0)
