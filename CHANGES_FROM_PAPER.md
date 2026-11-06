@@ -23,3 +23,14 @@ Reference draft: [arXiv:2608.27885](https://arxiv.org/abs/2608.27885).
   The standalone COCO scorer uses all reference captions; GPIC remains a
   single-reference evaluation. No new experimental scores are asserted by
   these code additions.
+- Add controlled BIT follow-up experiments on top of
+  `09-21-2026/claude/multi-node-flow-launchers` at `8ce528f`: a shared
+  bidirectional model trained to 400K with 200K/400K evaluations, and two
+  200K specialists using a fixed normalized Gaussian token vocabulary.
+  Both reuse the existing ablation architecture, training, and GPIC evaluation;
+  only random-vocabulary data preparation needs new Python. The 200K shared
+  checkpoint approximately matches the **combined** compute of two 200K
+  specialists, whereas 400K costs approximately twice as much. Protocol,
+  parameter-count qualifications, scaling, and existing specialist checkpoint
+  references are in `text_to_image/BIT_ABLATIONS.md`. These are additional
+  experimental controls, not reported results or changes to the BIT objective.

@@ -263,6 +263,12 @@ trajectory plots.
 
 See [`state_fate/README.md`](state_fate/README.md) for the end-to-end workflow.
 
+## Additional BIT ablations
+
+See [`text_to_image/BIT_ABLATIONS.md`](text_to_image/BIT_ABLATIONS.md) for
+train-and-evaluate launchers comparing a unified bidirectional BIT with the
+existing specialists, and fixed random token embeddings with Qwen embeddings.
+
 ## Acknowledgements
 
 This repository builds on:
