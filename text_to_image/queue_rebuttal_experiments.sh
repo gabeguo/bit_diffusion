@@ -21,7 +21,7 @@ SUBMIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SUBMIT_DIR"
 
 DEFAULT_EXPERIMENTS=(flowtok crossflow roundtrip_cfg editing_cfg bidir_400k noisy_flow)
-OPTIONAL_EXPERIMENTS=(roundtrip_n2d_cond)
+OPTIONAL_EXPERIMENTS=(roundtrip_n2d_cond bidir_small)
 declare -A DESCRIPTION=(
   [flowtok]="FlowTok-XL T2I row for Table 2 (GPIC protocol, 20 steps) [6E8U]"
   [crossflow]="CrossFlow T2I row for Table 2 (GPIC protocol, 50 steps) [6E8U]"
@@ -30,6 +30,7 @@ declare -A DESCRIPTION=(
   [bidir_400k]="Shared bidirectional BIT to BIDIR_TRAIN_STEPS (200K; 400K with BIDIR_CONTINUE=1) [xYk4, 6E8U]"
   [noisy_flow]="Flow ODE with stochastic source-endpoint noise, T2I + I2T [6E8U]"
   [roundtrip_n2d_cond]="(opt-in) round trip for noise-to-data restoring WITH inferred side information [4qvB W1]"
+  [bidir_small]="(opt-in) DiTXA-B/2 specialists vs shared, 2x100K-step legs, CFG-0 evals at 100K/200K [xYk4]"
 )
 
 usage() {
@@ -227,6 +228,8 @@ status_line() {
       have "$BIDIR_OUT/train/*/checkpoints/$ck" && s+="train$BIDIR_TRAIN_STEPS=done " || s+="train$BIDIR_TRAIN_STEPS=todo "
       for v in $(bidir_eval_steps); do bidir_eval_done "$v" && s+="eval$v=done " || s+="eval$v=todo "; done
       s+="($BIDIR_OUT)" ;;
+    bidir_small)
+      s=$(small_scale STATUS=1 | tr '\n' ';' | tr -s ' ') ;;
     noisy_flow)
       for v in $FLOW_VARIANTS; do
         if flow_eval_done "$v"; then s+="$v=done "
@@ -236,6 +239,11 @@ status_line() {
       s+="($FLOW_ROOT_BASE)" ;;
   esac
   echo "$s"
+}
+
+small_scale() {  # delegate to the standalone submitter with this queue's Slurm settings
+  env PREFIX_DIR="$PREFIX_DIR" RESERVATION="$RESERVATION" ACCOUNT="$ACCOUNT" QOS="$QOS" \
+    DRYRUN="$DRY" "$@" bash _launch_bit_small_scale.sh
 }
 
 rt_scales() {  # n2d_cond also runs the unguided reference
@@ -395,6 +403,9 @@ for key in "${SELECTED[@]}"; do
     roundtrip_cfg|roundtrip_n2d_cond) queue_roundtrip "$key" ;;
     editing_cfg) queue_editing ;;
     bidir_400k) queue_bidir ;;
+    bidir_small)
+      small_ids=$(small_scale)  # job ids on stdout, progress on stderr
+      if [[ -n "$small_ids" ]]; then mapfile -t small_arr <<< "$small_ids"; SUBMITTED+=("${small_arr[@]}"); fi ;;
     noisy_flow) queue_flow ;;
   esac
 done

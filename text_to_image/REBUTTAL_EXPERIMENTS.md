@@ -19,6 +19,7 @@ bash queue_rebuttal_experiments.sh             # submit everything not done yet
 | `bidir_400k` | xYk4, 6E8U | `_launch_bit_bidirectional.sh` on 4 nodes (`BIDIR_NODES`): shared model trained to 200K and evaluated there at CFG 0 (`BIDIR_EVAL_CFG_SCALES`); `BIDIR_CONTINUE=1` trains on to 400K and also evaluates at 400K | `$BIDIR_OUT/eval_<step>/*/eval/eval_metrics.json`; a checkpoint at the final step means evaluation only |
 | `noisy_flow` | 6E8U | Existing `_sbatch_flow.sh` stochastic-endpoint flow: T2I `text_noise`, I2T `image_noise` (σ = 0.01) | `<flow root>/*/eval/eval_metrics.json`; 200K checkpoint means evaluation only |
 | `roundtrip_n2d_cond` (opt-in) | 4qvB W1 | Round trip for the noise-to-data baseline restoring **with** inferred side information (`n2d_two`), at ω = 0 and each `ROUNDTRIP_CFG_SCALES` value | `$RESULTS_ROOT/roundtrip/cfg<ω>/n2d_cond_{image,text}/results.json` |
+| `bidir_small` (opt-in) | xYk4 | `_launch_bit_small_scale.sh`: DiTXA-B/2 T2I specialist, I2T specialist, and shared model, each trained 2 × 100K steps (leg 2 `afterok` leg 1), evaluated at 100K and 200K only (CFG 0, 10K samples per direction) | `$PREFIX_DIR/BiB_results/bit_small_scale/<run>/eval_<step>/*/eval/eval_metrics.json` |
 
 Selecting experiments:
 
@@ -32,6 +33,44 @@ bash queue_rebuttal_experiments.sh --only editing_cfg --force      # recompute e
 `--force` reruns evaluations whose results already exist. It never deletes
 checkpoints and never retrains a finished model. Rerunning the command is
 always safe. After a wall-time limit or a failure, run it again to resume.
+
+## Small-scale shared-vs-specialist control (`bidir_small`)
+
+```bash
+bash _launch_bit_small_scale.sh            # or: bash queue_rebuttal_experiments.sh --only bidir_small
+STATUS=1 bash _launch_bit_small_scale.sh   # per-run status
+```
+
+Three runs (`fwd`, `rev`, `shared`) use the Table 1 recipe at DiTXA-B/2 scale:
+batch 512, LR 1.5e-4, 5K warmup, EMA 0.9995, periodic SDE, image REPA 0.5,
+checkpoints every 10K (20 per run). The only change to the recipe is the REPA
+layer, which is 4: that is 1/3 of the 12-block trunk, as layer 8 is of the
+24-block L/2 trunk.
+
+Each run is two 2-node jobs. **Leg 1** trains to 100K and evaluates step 100K.
+**Leg 2** depends on leg 1 succeeding (`afterok`; a failed leg 1 cancels it),
+resumes the model *and the data order*, trains to 200K, and evaluates step
+200K. There are no other evaluations. Evaluations use CFG 0, 500 SDE steps,
+and 10K held-out samples per direction. A 10K-sample FID is not comparable to
+the 50K FID of Table 1, so compare only within this study.
+
+The submitter skips finished legs. Resubmitting after a failure resumes from
+the last checkpoint and data position, but don't resubmit while jobs are still
+queued.
+
+## Data-order resumption
+
+`train.py --resume-data-position` continues the training-data order where the
+checkpointed run stopped. Without it, every resume restarts the epoch-0
+order. The bidirectional and small-scale launchers pass it.
+
+- **How:** the position is the number of samples consumed so far, saved in new
+  checkpoints and inferred as step × global batch for older ones. Only
+  sampler indices are skipped, never data.
+- **Cost:** about one permutation of the dataset (~9 s for 98.5M indices,
+  the same cost as any epoch start), plus a sub-second skip.
+- **GPU count:** a different number of GPUs on resume gives the same global
+  order.
 
 ## Slurm settings
 

@@ -37,6 +37,7 @@ from torch.amp import autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, ConcatDataset
 from torch.utils.data.distributed import DistributedSampler
+from data_utils.resumable_sampler import ResumableDistributedSampler, data_resume_position
 
 import wandb
 
@@ -501,11 +502,19 @@ def _worker_init_fn(_worker_id):
     _reset(info.dataset)
 
 
-def cycle_loader(loader: DataLoader, sampler: DistributedSampler) -> Iterator[dict]:
-    """Yield batches forever, calling ``sampler.set_epoch`` each epoch."""
-    epoch = 0
+def cycle_loader(loader: DataLoader, sampler: DistributedSampler,
+                 start_epoch: int = 0, skip_first: int = 0) -> Iterator[dict]:
+    """Yield batches forever, calling ``sampler.set_epoch`` each epoch.
+
+    ``start_epoch``/``skip_first`` (per-rank indices) resume a data order part-way
+    through an epoch; the defaults reproduce the original epoch-0 start.
+    """
+    epoch = start_epoch
     while True:
         sampler.set_epoch(epoch)
+        if skip_first:
+            sampler.skip_next_epoch(skip_first)
+            skip_first = 0
         for batch in loader:
             yield batch
         epoch += 1
@@ -767,6 +776,11 @@ def main() -> None:
     parser.add_argument("--auto-resume", action="store_true",
                         help="If --resume is unset, resume from the newest "
                              "step_*.pt under --out-dir (for SLURM requeue).")
+    parser.add_argument("--resume-data-position", action="store_true",
+                        help="On resume, continue the training-data order where the "
+                             "checkpointed run stopped (epoch + offset from the samples "
+                             "consumed so far) instead of restarting epoch 0. Only "
+                             "indices are skipped, so this costs about one epoch start.")
     parser.add_argument("--seed", type=int, default=0)
 
     # Cache
@@ -1099,7 +1113,7 @@ def main() -> None:
             print(f"Text decode eval samples: {len(text_decode_eval_indices)} "
                   f"(requested {args.eval_text_decode_num_samples})")
 
-    train_sampler = DistributedSampler(
+    train_sampler = ResumableDistributedSampler(
         train_ds, num_replicas=world_size, rank=rank,
         shuffle=True, seed=args.seed, drop_last=True,
     )
@@ -1157,6 +1171,7 @@ def main() -> None:
 
     # ---- Resume
     train_steps = 0
+    data_samples_consumed = 0
     if args.auto_resume:
         assert args.resume is None
         args.resume = _find_latest_checkpoint(args.out_dir)
@@ -1200,6 +1215,10 @@ def main() -> None:
             token_decoder.load_state_dict(ckpt["token_decoder"])
             token_decoder_optimizer.load_state_dict(ckpt["token_decoder_optimizer"])
         train_steps = int(ckpt.get("step", 0))
+        # Logical position in the data stream; older checkpoints lack it, and
+        # step * global batch is the same quantity when the batch never changed.
+        data_samples_consumed = int(ckpt.get(
+            "data_samples_consumed", train_steps * args.global_batch_size))
         # Drop the checkpoint dict now that everything is loaded; otherwise it
         # lingers in scope for the whole run as a full duplicate of the model /
         # EMAs / optimizer state and can OOM a resumed run on the first step.
@@ -1220,7 +1239,20 @@ def main() -> None:
     slow_windows = 0  # consecutive sub-threshold log windows (throughput watchdog)
     running: dict[str, float] = {}
     counts: dict[str, int] = {}
-    train_iter = cycle_loader(train_loader, train_sampler)
+    start_epoch, skip_first = 0, 0
+    if args.resume_data_position and data_samples_consumed > 0 and not args.eval_only:
+        start_epoch, skip_first = data_resume_position(
+            data_samples_consumed, steps_per_epoch=len(train_loader),
+            global_batch=args.global_batch_size, local_batch=local_batch)
+        if rank == 0:
+            print(f"[resume-data-position] {data_samples_consumed:,} samples consumed -> "
+                  f"epoch {start_epoch}, skipping {skip_first:,} indices per rank "
+                  f"({len(train_loader):,} steps/epoch)")
+    elif data_samples_consumed > 0 and rank == 0 and not args.eval_only:
+        print("[resume] restarting the data order at epoch 0 "
+              "(pass --resume-data-position to continue where the run stopped)")
+    train_iter = cycle_loader(train_loader, train_sampler,
+                              start_epoch=start_epoch, skip_first=skip_first)
     log_window_start = time()
     log_window_steps = 0
     # Straggler diagnostics: time spent blocked on the dataloader vs. in the
@@ -1330,6 +1362,7 @@ def main() -> None:
                 counts[k] = counts.get(k, 0) + 1
             log_window_steps += 1
             train_steps += 1
+            data_samples_consumed += args.global_batch_size
 
             # ---- Periodic logging
             if train_steps % args.log_every == 0:
@@ -1411,6 +1444,7 @@ def main() -> None:
                 ckpt_path = ckpt_dir / f"step_{train_steps:07d}.pt"
                 torch.save({
                     "step": train_steps,
+                    "data_samples_consumed": data_samples_consumed,
                     "model": model.module.state_dict(),
                     "ema": ema.state_dict(),
                     **({

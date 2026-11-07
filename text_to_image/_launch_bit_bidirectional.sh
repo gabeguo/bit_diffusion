@@ -12,6 +12,7 @@
 # directory and run name, and --auto-resume picks the latest checkpoint. The LR
 # is constant after warmup, so --steps does not change the trajectory, and the
 # node count may differ from the original run (global batch stays 512).
+# Training resumes the data order where it stopped (--resume-data-position).
 # Reruns skip training once step TRAIN_STEPS exists and skip each evaluation
 # whose eval/eval_metrics.json is present.
 #SBATCH --account=m5319
@@ -50,7 +51,10 @@ if [[ "${EVAL_ONLY:-0}" != 1 ]]; then
   if [[ "${DRYRUN:-0}" != 1 ]] && compgen -G "$root/train/*/checkpoints/$final_ckpt" > /dev/null; then
     echo "Training already reached $TRAIN_STEPS steps under $root/train; skipping training."
   else
-    bit_run train bit_bidirectional "$root/train" "$TRAIN_DATA_ROOT" "$TRAIN_STEPS" "" "${cfg_args[@]}" "$@"
+    # --resume-data-position: a killed/requeued run continues the data order
+    # instead of replaying its start, matching the uninterrupted specialists.
+    bit_run train bit_bidirectional "$root/train" "$TRAIN_DATA_ROOT" "$TRAIN_STEPS" "" \
+      --resume-data-position "${cfg_args[@]}" "$@"
   fi
 fi
 for step in "${eval_steps[@]}"; do

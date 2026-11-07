@@ -67,3 +67,12 @@ Reference draft: [arXiv:2608.27885](https://arxiv.org/abs/2608.27885).
   CFG 0 only and runs on four nodes (global batch unchanged at 512).
   `CONTINUE=1` restores the 400K run with evaluations at 200K and 400K. Runs
   started by the earlier version resume unchanged.
+- `train.py --resume-data-position` (opt-in; passed by the shared-model and
+  small-scale launchers): a resumed run continues the data order where it
+  stopped instead of replaying epoch 0 from the start. Checkpoints now record
+  `data_samples_consumed`. Without the flag, behavior is unchanged.
+- Small-scale control, not in the paper (`_launch_bit_small_scale.sh`):
+  DiTXA-B/2 T2I and I2T specialists vs one shared model. The Table 1 recipe is
+  used except REPA layer 4 (instead of 8), and each run trains 200K steps in
+  two 100K legs. Evaluation is CFG 0 with 10K samples per direction at 100K and
+  200K only.

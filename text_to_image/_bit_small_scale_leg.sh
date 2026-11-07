@@ -1,0 +1,67 @@
+#!/bin/bash
+# One leg of the small-scale shared-vs-specialist control (DiTXA-B/2).
+# Submitted by _launch_bit_small_scale.sh; can also be sbatch'ed directly:
+#   sbatch --export=ALL,RUN=shared,LEG=1 _bit_small_scale_leg.sh
+# RUN=fwd (T2I specialist) | rev (I2T specialist) | shared (both directions per step)
+# LEG=1 trains to LEG_STEPS (100K) and evaluates that checkpoint; LEG=2 resumes
+# (model AND data order) to 2*LEG_STEPS (200K) and evaluates that checkpoint.
+# There are no training-time evaluations. Evaluation: CFG 0 only, 500 SDE
+# steps, SMALL_EVAL_SAMPLES (10K) held-out samples per direction.
+# Recipe otherwise identical to the Table 1 controls (_bit_ablation_common.sh):
+# batch 512, LR 1.5e-4, 5K warmup, EMA 0.9995, periodic SDE, image REPA 0.5,
+# checkpoints every 10K. DRYRUN=1 prints commands.
+#SBATCH --account=m5319
+#SBATCH --constraint=gpu&hbm80g
+#SBATCH --qos=regular
+#SBATCH --time=24:00:00
+#SBATCH --nodes=2
+#SBATCH --gpus-per-node=a100:4
+#SBATCH --cpus-per-task=64
+#SBATCH --ntasks-per-node=1
+#SBATCH --requeue
+
+set -eo pipefail
+cd "${BIT_SCRIPT_DIR:-${SLURM_SUBMIT_DIR:-$(dirname "${BASH_SOURCE[0]}")}}"
+if [[ -d text_to_image ]]; then cd text_to_image; fi
+source ./_bit_ablation_common.sh
+RUN=${RUN:?Set RUN to fwd, rev, or shared}
+LEG=${LEG:?Set LEG to 1 or 2}
+LEG_STEPS=${LEG_STEPS:-100000}
+SMALL_MODEL=${SMALL_MODEL:-DiTXA-B/2}
+# REPA aligns 1/3 of the way up the trunk in the Table 1 recipe (layer 8 of 24);
+# layer 4 keeps that relative depth for the 12-block B/2 trunk.
+SMALL_REPA_LAYER=${SMALL_REPA_LAYER:-4}
+SMALL_EVAL_SAMPLES=${SMALL_EVAL_SAMPLES:-10000}
+case "$RUN" in
+  fwd) direction=(--no-reverse) ;;
+  rev) direction=(--no-forward) ;;
+  shared) direction=() ;;
+  *) echo "RUN must be fwd, rev, or shared" >&2; exit 2 ;;
+esac
+[[ "$LEG" == 1 || "$LEG" == 2 ]] || { echo "LEG must be 1 or 2" >&2; exit 2; }
+if (( LEG_STEPS % CKPT_EVERY != 0 )); then
+  echo "LEG_STEPS=$LEG_STEPS must be a multiple of CKPT_EVERY=$CKPT_EVERY" >&2; exit 2
+fi
+root=${OUT_DIR:-$prefix/BiB_results/bit_small_scale}/$RUN
+target=$((LEG * LEG_STEPS))
+common=(--model "$SMALL_MODEL" --repa-image-layer "$SMALL_REPA_LAYER"
+  --eval-cfg-scales 0.0 "${direction[@]}")
+
+printf -v ckpt 'step_%07d.pt' "$target"
+if [[ "${DRYRUN:-0}" != 1 ]] && compgen -G "$root/train/*/checkpoints/$ckpt" > /dev/null; then
+  echo "[$RUN leg $LEG] training already reached $target steps; skipping training."
+else
+  # --eval-every beyond the run: no training-time evaluations at all.
+  bit_run train "bit_small_${RUN}" "$root/train" "$TRAIN_DATA_ROOT" "$target" "" \
+    "${common[@]}" --eval-every 1000000000 --resume-data-position "$@"
+fi
+
+if [[ "${FORCE_EVAL:-0}" != 1 && "${DRYRUN:-0}" != 1 ]] &&
+   compgen -G "$root/eval_${target}/*/eval/eval_metrics.json" > /dev/null; then
+  echo "[$RUN leg $LEG] evaluation at $target already written; skipping."
+  exit 0
+fi
+checkpoint=$(checkpoint_at "$root/train" "$target")
+bit_run eval "bit_small_${RUN}_eval_${target}" "$root/eval_${target}" "$EVAL_DATA_ROOT" \
+  "$target" "$checkpoint" "${common[@]}" \
+  --eval-fid-num-samples "$SMALL_EVAL_SAMPLES" --eval-i2t-num-samples "$SMALL_EVAL_SAMPLES" "$@"
