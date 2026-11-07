@@ -87,8 +87,13 @@ The step counts and guidance values come from the released code
   paper's noise-to-data baseline restores unconditionally, so ω has no effect
   on it. Set `ROUNDTRIP_BASELINE_IMAGE_JSONS` / `ROUNDTRIP_BASELINE_TEXT_JSONS`
   to the existing Fig. 3 `results.json` files to overlay them, or set
-  `ROUNDTRIP_CFG_SCALES="0.0 0.5"` to recompute the ω = 0 reference. Legends
-  show ω when it is nonzero.
+  `ROUNDTRIP_CFG_SCALES="0.0 0.5"` to recompute the ω = 0 reference. Once
+  any guided BIT run is overlaid, every BIT legend entry shows its CFG. Each
+  method keeps the colors of Fig. 3. All four methods on one chart:
+  `python editing_plot.py --results bit_cfg0.json bit_cfg0.5.json flow.json n2d.json --out fig.png`.
+  A flow run is recognized by `flow` in its checkpoint path, because
+  `results.json` does not record the transport. If yours isn't, pass
+  `--labels` (one per file).
 - **Editing (`perturbation_slerp_experiment.py`):** `--cfg-scale` is applied to
   the image→text inference (override with `--infer-cfg-scale`). It is also
   applied, identically, to noise backsolving (Eq. 61) and replay (Alg. 2). Using

@@ -7,8 +7,10 @@ results.json dicts and draws curves. Each run is one JSON file; comparing models
 
   # single run (also callable from editing_experiment.py via --plot)
   python editing_plot.py --results run.json --out run.png
-  # overlay several runs
-  python editing_plot.py --results a.json b.json c.json --out compare.png
+  # overlay several runs (one modality), e.g. Fig. 3 plus a guided BIT run
+  python editing_plot.py --results bit_cfg0.json bit_cfg0.5.json flow.json n2d.json --out compare.png
+  # explicit legend entries, one per file
+  python editing_plot.py --results ... --labels "BIT (CFG=0)" "BIT (CFG=0.5)" "Flow Matching" "Noise-to-Data"
 """
 
 from __future__ import annotations
@@ -20,8 +22,18 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from PIL import Image
 
-# Distinct marker per overlaid run, cycled by index.
-_MARKERS = ["o", "s", "^", "D", "v", "P", "*", "X", "<", ">"]
+# Fixed style per method, matching the paper's Fig. 3 (BIT blue circles,
+# noise-to-data orange squares, flow green triangles); guided BIT is distinct.
+_STYLE = {
+    "bit": ("C0", "o"),
+    "bit_cfg": ("C3", "D"),
+    "n2d": ("C1", "s"),
+    "flow": ("C2", "^"),
+    "n2d_cond": ("C4", "v"),
+}
+_EXTRA = [("C5", "P"), ("C6", "*"), ("C7", "X"), ("C8", "<"), ("C9", ">")]
+_NAMES = {"bit": "BIT", "flow": "Flow Matching", "n2d": "Noise-to-Data",
+          "n2d_cond": "Noise-to-Data (inferred cond.)"}
 
 
 def _series(result: dict):
@@ -34,40 +46,65 @@ def _series(result: dict):
     return fr, fmean, fstd, div
 
 
-def _convert_mode_name(mode_name: str) -> str:
-    if "data2data" in mode_name:
-        return "BIT"
-    elif mode_name == "n2d_two":
-        # restores conditionally on the cross-modal context inferred by a second model
-        return "Noise-to-Data (inferred cond.)"
-    elif "n2d" in mode_name:
-        return "Noise-to-Data"
-    return mode_name
-
-def _label(result: dict, include_ckpt: bool = False) -> str:
+def _method(result: dict) -> str:
+    """bit / flow / n2d / n2d_cond. A single-field flow round trip is stored as a
+    data2data mode; results.json does not record the transport, so a flow run is
+    recognized by an explicit meta["sde"] or by "flow" in its checkpoint path.
+    Use --labels if that heuristic does not fit your paths."""
     m = result["meta"]
-    ck = m.get("forward_ckpt") or m.get("reverse_ckpt") or "?"
-    # Ground-truth references x variations per reference. Fall back to total
-    # fidelity samples (n = num_images * num_variations) if meta is missing.
-    n_ref = m.get("num_images")
-    n_var = m.get("num_variations")
+    mode = m["mode"]
+    if mode == "n2d_two":
+        return "n2d_cond"
+    if "n2d" in mode:
+        return "n2d"
+    ckpts = " ".join(str(m.get(k) or "") for k in ("forward_ckpt", "reverse_ckpt")).lower()
+    if m.get("sde") == "flow_matching" or (m.get("sde") is None and "flow" in ckpts):
+        return "flow"
+    return "bit"
+
+
+def _cfg(result: dict) -> float:
+    return float(result["meta"].get("cfg_scale") or 0.0)
+
+
+def _counts(result: dict) -> str:
+    m = result["meta"]
+    n_ref, n_var = m.get("num_images"), m.get("num_variations")
     if n_ref and n_var:
-        n_str = f"{n_ref} ref \u00d7 {n_var} var"
-    else:
-        ns = {v["n"] for v in result["by_fraction"].values() if v.get("n")}
-        n_str = f"n={ns.pop()}" if len(ns) == 1 else (f"n~{min(ns)}" if ns else "")
-    tail = f" ({n_str})" if n_str else ""
-    mode_name = _convert_mode_name(m['mode'])
-    # Distinguish guided runs in overlays; unguided (w = 0) labels are unchanged.
-    if m.get("cfg_scale", 0.0):
-        mode_name = f"{mode_name}, \u03c9={m['cfg_scale']:g}"
-    if include_ckpt:
-        return f"{mode_name} ({Path(ck).parent.parent.name or Path(ck).name}){tail}"
-    else:
-        return f"{mode_name}{tail}"
+        return f"{n_ref} ref × {n_var} var"
+    ns = {v["n"] for v in result["by_fraction"].values() if v.get("n")}
+    return f"n={ns.pop()}" if len(ns) == 1 else (f"n~{min(ns)}" if ns else "")
 
 
-def _plot(results: list[dict], out_path):
+def _label(result: dict, show_cfg: bool = False, counts: bool = True) -> str:
+    """e.g. "BIT (CFG=0.5; 500 ref x 8 var)". CFG is printed for BIT whenever
+    ``show_cfg`` (any overlaid BIT run is guided) or the run itself is guided."""
+    method = _method(result)
+    parts = []
+    if method == "bit" and (show_cfg or _cfg(result) > 0):
+        parts.append(f"CFG={_cfg(result):g}")
+    elif method == "n2d_cond" and _cfg(result) > 0:
+        parts.append(f"CFG={_cfg(result):g}")
+    if counts and _counts(result):
+        parts.append(_counts(result))
+    name = _NAMES[method]
+    return f"{name} ({'; '.join(parts)})" if parts else name
+
+
+def _styles(results: list[dict]) -> list[tuple[str, str]]:
+    """Fixed color/marker per method; repeated methods get unused extras."""
+    used, extra, out = set(), iter(_EXTRA), []
+    for r in results:
+        key = _method(r)
+        if key == "bit" and _cfg(r) > 0:
+            key = "bit_cfg"
+        style = _STYLE[key] if key not in used else next(extra, ("k", "o"))
+        used.add(key)
+        out.append(style)
+    return out
+
+
+def _plot(results: list[dict], out_path, labels: list[str] | None = None, counts: bool = True):
     plt.rcParams.update({
         'font.size': 12,          # base size for everything
         'axes.titlesize': 16,     # subplot titles
@@ -77,15 +114,21 @@ def _plot(results: list[dict], out_path):
         'legend.fontsize': 10,
         'figure.titlesize': 18,   # suptitle
     })
-    modality = results[0]["meta"]["generate_modality"]
+    modalities = {r["meta"]["generate_modality"] for r in results}
+    if len(modalities) != 1:
+        raise ValueError(f"cannot overlay different modalities: {sorted(modalities)}")
+    if labels is not None and len(labels) != len(results):
+        raise ValueError(f"got {len(labels)} labels for {len(results)} results")
+    modality = modalities.pop()
     sim = "DINOv2" if modality == "image" else "Qwen3"
+    show_cfg = any(_method(r) == "bit" and _cfg(r) > 0 for r in results)
     fig, (ax_fid, ax_div) = plt.subplots(1, 2, figsize=(12, 4.5))
-    for i, r in enumerate(results):
+    for i, (r, (color, marker)) in enumerate(zip(results, _styles(results))):
         fr, fmean, fstd, div = _series(r)
-        marker = _MARKERS[i % len(_MARKERS)]
-        ax_fid.errorbar(fr, fmean, yerr=fstd, marker=marker, capsize=3,
-                        alpha=0.7, label=_label(r))
-        ax_div.plot(fr, div, marker=marker, alpha=0.7, label=_label(r))
+        label = labels[i] if labels is not None else _label(r, show_cfg=show_cfg, counts=counts)
+        ax_fid.errorbar(fr, fmean, yerr=fstd, marker=marker, color=color, capsize=3,
+                        alpha=0.7, label=label)
+        ax_div.plot(fr, div, marker=marker, color=color, alpha=0.7, label=label)
     ax_fid.set(xlabel="corruption fraction", ylabel=f"{sim} cosine to original",
                title="Fidelity (mean +/- std)")
     ax_div.set(xlabel="corruption fraction", ylabel="mean pairwise cosine",
@@ -152,13 +195,18 @@ def plot_single(result: dict, out_path):
     _plot([result], out_path)
 
 
-def plot_many(json_paths: list[str], out_path):
-    _plot([json.loads(Path(p).read_text()) for p in json_paths], out_path)
+def plot_many(json_paths: list[str], out_path, labels: list[str] | None = None, counts: bool = True):
+    _plot([json.loads(Path(p).read_text()) for p in json_paths], out_path, labels=labels, counts=counts)
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--results", nargs="+", required=True)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--results", nargs="+", required=True,
+                    help="results.json files of ONE modality, plotted in this order.")
+    ap.add_argument("--labels", nargs="+", default=None,
+                    help="Legend entries, one per --results file (overrides automatic labels).")
+    ap.add_argument("--no-counts", action="store_true",
+                    help="Omit the '500 ref x 8 var' sample counts from automatic labels.")
     ap.add_argument("--out", default="editing_results/comparison.png")
     a = ap.parse_args()
-    plot_many(a.results, a.out)
+    plot_many(a.results, a.out, labels=a.labels, counts=not a.no_counts)
