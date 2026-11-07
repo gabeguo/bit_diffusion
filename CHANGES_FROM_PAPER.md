@@ -61,3 +61,9 @@ Reference draft: [arXiv:2608.27885](https://arxiv.org/abs/2608.27885).
     `eval/eval_metrics.json`. `_launch_bit_bidirectional.sh` skips finished
     phases, and `_sbatch_flow.sh` can refuse a partial checkpoint
     (`REQUIRE_STEP`).
+- The shared bidirectional control (`_launch_bit_bidirectional.sh`) now trains
+  to 200K by default. That is the point matching each specialist's
+  per-direction examples and the pair's combined compute. It evaluates there at
+  CFG 0 only and runs on four nodes (global batch unchanged at 512).
+  `CONTINUE=1` restores the 400K run with evaluations at 200K and 400K. Runs
+  started by the earlier version resume unchanged.

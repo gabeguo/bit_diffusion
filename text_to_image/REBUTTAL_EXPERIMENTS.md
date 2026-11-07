@@ -16,7 +16,7 @@ bash queue_rebuttal_experiments.sh             # submit everything not done yet
 | `crossflow` | 6E8U | CrossFlow 256 px CLIP DiMR T2I, same protocol (50 Euler steps, guidance 7.0) | `$RESULTS_ROOT/external/crossflow_256_clip/results.json` |
 | `roundtrip_cfg` | 4qvB Q2 | Fig. 3 round-trip variation with BIT at ω = `ROUNDTRIP_CFG_SCALES` (default 0.5), image and text, plus overlay plots | `$RESULTS_ROOT/roundtrip/cfg<ω>/d2d_{image,text}/results.json` |
 | `editing_cfg` | 4qvB Q2 | Fig. 5 image editing at ω = `EDIT_CFG_SCALES` (default 0.5), plus a four-row Figure-5-style PDF/PNG | `$RESULTS_ROOT/editing/cfg<ω>/manifest.json` (complete) and `figure5_cfg<ω>.pdf` |
-| `bidir_400k` | xYk4, 6E8U | Existing `_launch_bit_bidirectional.sh`: shared model trained to 400K, evaluated at 200K and 400K | `$BIDIR_OUT/eval_{200000,400000}/*/eval/eval_metrics.json`; 400K checkpoint means evaluation only |
+| `bidir_400k` | xYk4, 6E8U | `_launch_bit_bidirectional.sh` on 4 nodes (`BIDIR_NODES`): shared model trained to 200K and evaluated there at CFG 0 (`BIDIR_EVAL_CFG_SCALES`); `BIDIR_CONTINUE=1` trains on to 400K and also evaluates at 400K | `$BIDIR_OUT/eval_<step>/*/eval/eval_metrics.json`; a checkpoint at the final step means evaluation only |
 | `noisy_flow` | 6E8U | Existing `_sbatch_flow.sh` stochastic-endpoint flow: T2I `text_noise`, I2T `image_noise` (σ = 0.01) | `<flow root>/*/eval/eval_metrics.json`; 200K checkpoint means evaluation only |
 | `roundtrip_n2d_cond` (opt-in) | 4qvB W1 | Round trip for the noise-to-data baseline restoring **with** inferred side information (`n2d_two`), at ω = 0 and each `ROUNDTRIP_CFG_SCALES` value | `$RESULTS_ROOT/roundtrip/cfg<ω>/n2d_cond_{image,text}/results.json` |
 

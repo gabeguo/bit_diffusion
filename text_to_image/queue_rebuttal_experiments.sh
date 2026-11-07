@@ -27,7 +27,7 @@ declare -A DESCRIPTION=(
   [crossflow]="CrossFlow T2I row for Table 2 (GPIC protocol, 50 steps) [6E8U]"
   [roundtrip_cfg]="Fig. 3 round-trip variation with BIT at CFG ROUNDTRIP_CFG_SCALES [4qvB Q2]"
   [editing_cfg]="Fig. 5 image editing at CFG EDIT_CFG_SCALES + 4-row figure [4qvB Q2]"
-  [bidir_400k]="Shared bidirectional BIT, 400K steps, evals at 200K/400K [xYk4, 6E8U]"
+  [bidir_400k]="Shared bidirectional BIT to BIDIR_TRAIN_STEPS (200K; 400K with BIDIR_CONTINUE=1) [xYk4, 6E8U]"
   [noisy_flow]="Flow ODE with stochastic source-endpoint noise, T2I + I2T [6E8U]"
   [roundtrip_n2d_cond]="(opt-in) round trip for noise-to-data restoring WITH inferred side information [4qvB W1]"
 )
@@ -124,11 +124,15 @@ EDIT_TIME=${EDIT_TIME:-24:00:00}
 FIG5_IMAGES=${FIG5_IMAGES:-}               # dataset indices of the 4 rows; default first 4
 # Shared bidirectional model (existing _launch_bit_bidirectional.sh).
 BIDIR_OUT=${BIDIR_OUT:-$PREFIX_DIR/BiB_results/bit_bidirectional}
-BIDIR_NODES=${BIDIR_NODES:-2}
+BIDIR_NODES=${BIDIR_NODES:-4}
 BIDIR_TIME=${BIDIR_TIME:-48:00:00}
 BIDIR_CHAIN=${BIDIR_CHAIN:-3}              # chained resubmissions (each resumes)
 BIDIR_ARGS=${BIDIR_ARGS:-}                 # extra train.py flags, e.g. "--wandb-project bit-controls"
 SPECIALIST_STEPS=${SPECIALIST_STEPS:-200000}
+BIDIR_CONTINUE=${BIDIR_CONTINUE:-0}        # 1: train on to 2*SPECIALIST_STEPS (400K)
+if [[ "$BIDIR_CONTINUE" == 1 ]]; then BIDIR_TRAIN_STEPS=${BIDIR_TRAIN_STEPS:-$((2 * SPECIALIST_STEPS))}; fi
+BIDIR_TRAIN_STEPS=${BIDIR_TRAIN_STEPS:-$SPECIALIST_STEPS}
+BIDIR_EVAL_CFG_SCALES=${BIDIR_EVAL_CFG_SCALES:-0.0}
 # Stochastic-endpoint flow (existing _sbatch_flow.sh / _flow_common.sh).
 FLOW_VARIANTS=${FLOW_VARIANTS:-"text_noise image_noise"}
 FLOW_ROOT_BASE=${FLOW_ROOT_BASE:-$PREFIX_DIR/BiB_results/flow_comparison}
@@ -193,6 +197,10 @@ rt_out() { echo "$RESULTS_ROOT/roundtrip/cfg$1/$2"; }
 edit_out() { echo "$RESULTS_ROOT/editing/cfg$1"; }
 edit_complete() { [[ -s "$1/manifest.json" ]] && grep -q '"complete": true' "$1/manifest.json"; }
 bidir_eval_done() { have "$BIDIR_OUT/eval_$1/*/eval/eval_metrics.json"; }
+bidir_eval_steps() {
+  echo "$SPECIALIST_STEPS"
+  if (( BIDIR_TRAIN_STEPS != SPECIALIST_STEPS )); then echo "$BIDIR_TRAIN_STEPS"; fi
+}
 flow_root() { echo "$FLOW_ROOT_BASE/abl_flow_matching_$1"; }
 flow_final_ckpt() { printf '%s/*/checkpoints/step_%07d.pt' "$(flow_root "$1")" "$FLOW_STEPS"; }
 flow_eval_done() { have "$(flow_root "$1")/*/eval/eval_metrics.json"; }
@@ -214,10 +222,10 @@ status_line() {
         else s+="cfg$w=todo "; fi
       done ;;
     bidir_400k)
-      local final=$((2 * SPECIALIST_STEPS)) ck
-      printf -v ck 'step_%07d.pt' "$final"
-      have "$BIDIR_OUT/train/*/checkpoints/$ck" && s+="train=done " || s+="train=todo "
-      for v in "$SPECIALIST_STEPS" "$final"; do bidir_eval_done "$v" && s+="eval$v=done " || s+="eval$v=todo "; done
+      local ck
+      printf -v ck 'step_%07d.pt' "$BIDIR_TRAIN_STEPS"
+      have "$BIDIR_OUT/train/*/checkpoints/$ck" && s+="train$BIDIR_TRAIN_STEPS=done " || s+="train$BIDIR_TRAIN_STEPS=todo "
+      for v in $(bidir_eval_steps); do bidir_eval_done "$v" && s+="eval$v=done " || s+="eval$v=todo "; done
       s+="($BIDIR_OUT)" ;;
     noisy_flow)
       for v in $FLOW_VARIANTS; do
@@ -333,13 +341,15 @@ queue_editing() {
 }
 
 queue_bidir() {
-  local final=$((2 * SPECIALIST_STEPS))
-  if bidir_eval_done "$SPECIALIST_STEPS" && bidir_eval_done "$final" && [[ "$FORCE" != 1 ]]; then
-    note bidir_400k "evaluations at $SPECIALIST_STEPS and $final exist under $BIDIR_OUT"; return; fi
+  local v all_done=1
+  for v in $(bidir_eval_steps); do bidir_eval_done "$v" || all_done=0; done
+  if [[ "$all_done" == 1 && "$FORCE" != 1 ]]; then
+    note bidir_400k "evaluations at $(bidir_eval_steps | tr '\n' ' ')exist under $BIDIR_OUT"; return; fi
   local ck n=$BIDIR_CHAIN prev="" k
-  printf -v ck 'step_%07d.pt' "$final"
+  printf -v ck 'step_%07d.pt' "$BIDIR_TRAIN_STEPS"
   have "$BIDIR_OUT/train/*/checkpoints/$ck" && n=1   # only evaluations remain
   local env=(OUT_DIR="$BIDIR_OUT" SPECIALIST_STEPS="$SPECIALIST_STEPS"
+    TRAIN_STEPS="$BIDIR_TRAIN_STEPS" EVAL_CFG_SCALES="$BIDIR_EVAL_CFG_SCALES"
     TRAIN_DATA_ROOT="${TRAIN_DATA_ROOT:-$PREFIX_DIR/datasets/text_to_image/gpic_latents/train}"
     EVAL_DATA_ROOT="$EVAL_DATA_ROOT"
     DINO_DIR="${DINO_DIR:-$PREFIX_DIR/datasets/text_to_image/gpic_latents_dino/train}")
