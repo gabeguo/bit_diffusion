@@ -39,7 +39,8 @@ sbatch text_to_image/_launch_bit_random_tokens.sh
 ```
 
 Each allocation runs its phases sequentially. Defaults are eight GPUs locally,
-or two Perlmutter nodes with four A100s each, account `m5319`, no reservation,
+or Perlmutter nodes with four A100s each (four nodes for the shared model, two for
+the random-token specialists), account `m5319`, no reservation,
 and `dit_env`. Standard `sbatch --account=... --time=...` overrides apply.
 Training uses `--auto-resume`, and a failed phase stops the script before any
 subsequent evaluation. Rerunning resumes training; completed evaluations can
@@ -78,9 +79,14 @@ remain part of the comparison.
 ## Unified versus specialist models
 
 `_launch_bit_bidirectional.sh` trains one `DiTXA-L/2` with both directions to
-400K steps, then evaluates **both directions** at exactly 200K and 400K.
-Evaluations use separate output directories. Missing or ambiguous checkpoints
-raise an error; a partial run's latest checkpoint is never substituted.
+200K steps by default and evaluates **both directions** there, at CFG 0 only
+(`EVAL_CFG_SCALES="0.0 0.5"` restores both scales). It requests four nodes;
+the global batch stays 512. `CONTINUE=1` trains on to 400K and also evaluates
+at 400K. Runs started by the earlier 400K-by-default version resume unchanged:
+same output directory, `--auto-resume`, and a constant post-warmup LR, so the
+200K checkpoint is the same either way. Evaluations use separate output
+directories. Missing or ambiguous checkpoints raise an error; a partial run's
+latest checkpoint is never substituted.
 
 The shared model and each specialist use the same trunk and token decoder.
 Parameter matching is approximate: the shared model activates both conditioning
