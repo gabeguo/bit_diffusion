@@ -119,3 +119,21 @@ bit_run() {
   fi
   run "${launch[@]}" "${args[@]}"
 }
+
+# bit_run train with the in-allocation retry loop of _multi_node_train.sh /
+# _sbatch_flow.sh: a failed attempt (crash, NCCL timeout, or the train.py
+# throughput watchdog) relaunches after RETRY_SLEEP seconds and resumes from the
+# latest checkpoint (--auto-resume). TRAIN_RETRIES attempts in total (default 1,
+# i.e. no retry). Unlike those loops, this returns non-zero when every attempt
+# failed, so the calling phase fails and afterok dependents do not start.
+bit_train() {
+  local max=${TRAIN_RETRIES:-1} attempt
+  for ((attempt = 1; attempt <= max; attempt++)); do
+    if (( max > 1 )); then echo "=== training attempt $attempt/$max ==="; fi
+    if bit_run train "$@"; then return 0; fi
+    echo "=== training attempt $attempt/$max exited non-zero ===" >&2
+    if (( attempt < max )); then sleep "${RETRY_SLEEP:-10}"; fi
+  done
+  echo "Training failed after $max attempt(s)" >&2
+  return 1
+}

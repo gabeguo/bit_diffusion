@@ -42,7 +42,9 @@ Each allocation runs its phases sequentially. Defaults are eight GPUs locally,
 or Perlmutter nodes with four A100s each (four nodes for the shared model, two for
 the random-token specialists), account `m5319`, no reservation,
 and `dit_env`. Standard `sbatch --account=... --time=...` overrides apply.
-Training uses `--auto-resume`, and a failed phase stops the script before any
+Training uses `--auto-resume`. The shared-model launcher retries failed training
+in the allocation (`TRAIN_RETRIES`, default 10) under a 0.7 steps/s throughput
+watchdog; see `REBUTTAL_EXPERIMENTS.md`. Otherwise a failed phase stops the script before any
 subsequent evaluation. Rerunning resumes training; completed evaluations can
 run again. Wall-time termination requires resubmission. `EVAL_ONLY=1` skips
 training and evaluates the required existing checkpoints.
