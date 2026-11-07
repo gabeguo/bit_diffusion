@@ -9,7 +9,8 @@
 # steps, SMALL_EVAL_SAMPLES (10K) held-out samples per direction.
 # Recipe otherwise identical to the Table 1 controls (_bit_ablation_common.sh):
 # batch 512, LR 1.5e-4, 5K warmup, EMA 0.9995, periodic SDE, image REPA 0.5,
-# checkpoints every 10K. DRYRUN=1 prints commands.
+# checkpoints every SMALL_CKPT_EVERY (20K: 10 per run, incl. 100K and 200K).
+# DRYRUN=1 prints commands.
 #SBATCH --account=m5319
 #SBATCH --constraint=gpu&hbm80g
 #SBATCH --qos=regular
@@ -23,6 +24,9 @@
 set -eo pipefail
 cd "${BIT_SCRIPT_DIR:-${SLURM_SUBMIT_DIR:-$(dirname "${BASH_SOURCE[0]}")}}"
 if [[ -d text_to_image ]]; then cd text_to_image; fi
+# Set before sourcing: _bit_ablation_common.sh keeps an existing CKPT_EVERY and
+# checks that it divides SPECIALIST_STEPS (200K); LEG_STEPS is checked below.
+CKPT_EVERY=${SMALL_CKPT_EVERY:-20000}
 source ./_bit_ablation_common.sh
 RUN=${RUN:?Set RUN to fwd, rev, or shared}
 LEG=${LEG:?Set LEG to 1 or 2}

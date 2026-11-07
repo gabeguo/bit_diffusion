@@ -43,7 +43,8 @@ STATUS=1 bash _launch_bit_small_scale.sh   # per-run status
 
 Three runs (`fwd`, `rev`, `shared`) use the Table 1 recipe at DiTXA-B/2 scale:
 batch 512, LR 1.5e-4, 5K warmup, EMA 0.9995, periodic SDE, image REPA 0.5,
-checkpoints every 10K (20 per run). The only change to the recipe is the REPA
+checkpoints every 20K (10 per run, including
+100K and 200K; `SMALL_CKPT_EVERY` overrides). The only change to the recipe is the REPA
 layer, which is 4: that is 1/3 of the 12-block trunk, as layer 8 is of the
 24-block L/2 trunk.
 
