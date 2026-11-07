@@ -43,8 +43,7 @@ STATUS=1 bash _launch_bit_small_scale.sh   # per-run status
 
 Three runs (`fwd`, `rev`, `shared`) use the Table 1 recipe at DiTXA-B/2 scale:
 batch 512, LR 1.5e-4, 5K warmup, EMA 0.9995, periodic SDE, image REPA 0.5,
-checkpoints every 20K (10 per run, including
-100K and 200K; `SMALL_CKPT_EVERY` overrides). The only change to the recipe is the REPA
+checkpoints every 10K (20 per run; `SMALL_CKPT_EVERY` overrides). The only change to the recipe is the REPA
 layer, which is 4: that is 1/3 of the 12-block trunk, as layer 8 is of the
 24-block L/2 trunk.
 
@@ -58,6 +57,28 @@ the 50K FID of Table 1, so compare only within this study.
 The submitter skips finished legs. Resubmitting after a failure resumes from
 the last checkpoint and data position, but don't resubmit while jobs are still
 queued.
+
+## Retries and throughput watchdog
+
+The training phase of the small study (`_bit_small_scale_leg.sh`) and of the
+L/2 shared run (`_launch_bit_bidirectional.sh`) retries inside its allocation
+up to `TRAIN_RETRIES` (10) times. Each attempt resumes the model and the data
+position. This is the same loop as `_multi_node_train.sh`, with one
+difference: if every attempt fails, the job fails, so `afterok` dependents
+don't start. Evaluations aren't retried.
+
+Each attempt runs `train.py`'s existing throughput watchdog. It exits after
+`MIN_THROUGHPUT_WINDOWS` (5) consecutive 100-step windows below
+`MIN_THROUGHPUT` steps/s, which triggers the next retry:
+
+| Run | Default `MIN_THROUGHPUT` |
+|---|---|
+| Small study, shared model | 1.3 |
+| Small study, each specialist | 2.0 |
+| L/2 shared run | 0.7 |
+
+A retry runs on the same nodes. If a node stays slow, cancel the job and
+resubmit to get different ones.
 
 ## Data-order resumption
 
