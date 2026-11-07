@@ -1,0 +1,11 @@
+# Extra packages imported by the official FlowTok / CrossFlow inference code
+# (on top of the BIT training environment). See REBUTTAL_EXPERIMENTS.md.
+open_clip_torch
+ml_collections
+absl-py
+einops
+timm
+ftfy
+torchdiffeq
+fairscale
+huggingface_hub

@@ -116,11 +116,42 @@ class SDE:
 
 
 class FlowMatchingODE(SDE):
-    """Deterministic rectified-flow transport with the SDE sampling interface."""
+    """Rectified flow with optional Gaussian perturbations of paired endpoints.
 
-    def __init__(self, score_network, force_unconditional=False):
+    Sigmas are per-coordinate standard deviations in the *scaled bridge space*.
+    The ODE is deterministic given its initial state; stochasticity comes from
+    sampling that state once. Conditioning always retains the clean source.
+    """
+
+    def __init__(self, score_network, force_unconditional=False,
+                 text_sigma=0.0, image_sigma=0.0):
         super().__init__(A=0, score_network=score_network)
         self.force_unconditional = force_unconditional
+        for name, value in (("text_sigma", text_sigma), ("image_sigma", image_sigma)):
+            if not math.isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be finite and nonnegative, got {value}")
+        self.text_sigma = text_sigma
+        self.image_sigma = image_sigma
+
+    @staticmethod
+    def _perturb(x, sigma):
+        # Preserve both values and the RNG stream of the original sigma=0 run.
+        return x if sigma == 0 else x + sigma * torch.randn_like(x)
+
+    def perturb_endpoints(self, x_0, x_1):
+        """Use these same draws for the interpolant AND the velocity target."""
+        return self._perturb(x_0, self.text_sigma), self._perturb(x_1, self.image_sigma)
+
+    def simulate(self, x_start, num_steps, reverse=False, return_all=False,
+                 cfg_scale=0.0, ode=False, x_cond=None, y=None):
+        """Accept a clean source; draw source noise once, then integrate."""
+        clean_cond = x_start if x_cond is None else x_cond
+        sigma = self.image_sigma if reverse else self.text_sigma
+        return super().simulate(
+            self._perturb(x_start, sigma), num_steps, reverse=reverse,
+            return_all=return_all, cfg_scale=cfg_scale, ode=ode,
+            x_cond=clean_cond, y=y,
+        )
 
     @staticmethod
     def _unsupported(name):

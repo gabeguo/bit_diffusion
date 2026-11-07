@@ -25,11 +25,15 @@ Implemented transport processes include:
 - Uniform-volatility diffusion bridges
 - Periodic-volatility diffusion bridges
 - Cosine-decaying volatility
-- Rectified flow matching *(baseline that fails by deterministic construction)*
+- Rectified flow matching, with optional stochastic endpoints and clean source conditioning
 - Optional EDM-style preconditioning *(not extensively tested)*
 - Forward-only, reverse-only, and bidirectional training
 - Noise-to-data ablations
 - Text and image REPA objectives
+
+See [stochastic flow matching](text_to_image/FLOW_MATCHING.md) for matched training/evaluation
+launchers and [COCO evaluation](text_to_image/COCO_EVALUATION.md) for dataset downloads,
+T2I/I2T protocols, standard CIDEr, and SPICE.
 
 ## Repository layout
 
@@ -258,6 +262,19 @@ data preparation, vector models, distributed training, baselines, metrics, and
 trajectory plots.
 
 See [`state_fate/README.md`](state_fate/README.md) for the end-to-end workflow.
+
+## Additional BIT ablations
+
+See [`text_to_image/BIT_ABLATIONS.md`](text_to_image/BIT_ABLATIONS.md) for
+train-and-evaluate launchers comparing a unified bidirectional BIT with the
+existing specialists, and fixed random token embeddings with Qwen embeddings.
+
+## ICLR rebuttal experiments
+
+[`text_to_image/REBUTTAL_EXPERIMENTS.md`](text_to_image/REBUTTAL_EXPERIMENTS.md)
+describes `queue_rebuttal_experiments.sh`, which queues every rebuttal
+experiment in Slurm with one command, skipping any that already have results.
+The matching LaTeX is in [`rebuttal_experimental_description/`](rebuttal_experimental_description/).
 
 ## Acknowledgements
 

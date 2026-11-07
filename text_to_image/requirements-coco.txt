@@ -1,0 +1,4 @@
+# Install in the existing training environment. Java 8 is also needed for SPICE.
+pycocoevalcap==1.2
+clean-fid==0.1.35
+opencv-python-headless>=4.8

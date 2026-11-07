@@ -37,6 +37,7 @@ from torch.amp import autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, ConcatDataset
 from torch.utils.data.distributed import DistributedSampler
+from data_utils.resumable_sampler import ResumableDistributedSampler, data_resume_position
 
 import wandb
 
@@ -131,6 +132,7 @@ _EVAL_CHECKPOINT_ARGS = (
     "repa_text_layer", "repa_image", "repa_image_layer", "sde",
     "periodic_sde_alpha", "periodic_sde_k", "periodic_sde_eps", "K",
     "edm_precond", "sigma0_sq", "sigma1_sq", "sigma01", "vae_ckpt",
+    "flow_text_sigma", "flow_image_sigma",
 )
 
 
@@ -141,7 +143,8 @@ def _validate_eval_checkpoint_args(args, ckpt, repa_image_dim) -> None:
     for key in _EVAL_CHECKPOINT_ARGS:
         if key == "force_unconditional" and key not in saved:
             continue  # Backward compatibility with pre-flow-matching checkpoints.
-        current, expected = getattr(args, key), saved.get(key, "<missing>")
+        default = 0.0 if key in ("flow_text_sigma", "flow_image_sigma") else "<missing>"
+        current, expected = getattr(args, key), saved.get(key, default)
         if current != expected:
             mismatches.append((key, current, expected))
 
@@ -317,6 +320,8 @@ def train_step(
     # interpolates between PHYSICAL x_0 and x_1 based on t (conditioning signal may be different)
     is_flow_matching = isinstance(sde, FlowMatchingODE)
     if is_flow_matching:
+        # x_cond_0/1 remain clean; the target and interpolant share these draws.
+        x_0, x_1 = sde.perturb_endpoints(x_0, x_1)
         x_t = sample_flow_matching_x_t(x_0=x_0, x_1=x_1, t=t)
     else:
         x_t = sample_p_base_x_t_cond_x_0_x_1(
@@ -435,7 +440,7 @@ def train_step(
             dec_loss, dec_logs = token_decoder_loss(
                 decoder=token_decoder,
                 sde=sde,
-                x_0=x_0,
+                x_0=x_cond_0 if is_flow_matching else x_0,
                 token_ids=batch["text_token_ids"],
                 token_mask=batch["text_token_mask"],
                 noise_t_max=token_decoder_noise_t_max,
@@ -497,11 +502,19 @@ def _worker_init_fn(_worker_id):
     _reset(info.dataset)
 
 
-def cycle_loader(loader: DataLoader, sampler: DistributedSampler) -> Iterator[dict]:
-    """Yield batches forever, calling ``sampler.set_epoch`` each epoch."""
-    epoch = 0
+def cycle_loader(loader: DataLoader, sampler: DistributedSampler,
+                 start_epoch: int = 0, skip_first: int = 0) -> Iterator[dict]:
+    """Yield batches forever, calling ``sampler.set_epoch`` each epoch.
+
+    ``start_epoch``/``skip_first`` (per-rank indices) resume a data order part-way
+    through an epoch; the defaults reproduce the original epoch-0 start.
+    """
+    epoch = start_epoch
     while True:
         sampler.set_epoch(epoch)
+        if skip_first:
+            sampler.skip_next_epoch(skip_first)
+            skip_first = 0
         for batch in loader:
             yield batch
         epoch += 1
@@ -641,6 +654,10 @@ def main() -> None:
         "--force-unconditional", action="store_true",
         help="Train and sample one unconditional forward FlowMatchingODE field.",
     )
+    parser.add_argument("--flow-text-sigma", type=float, default=0.0,
+                        help="Gaussian endpoint std in scaled text bridge coordinates (flow matching only).")
+    parser.add_argument("--flow-image-sigma", type=float, default=0.0,
+                        help="Gaussian endpoint std in scaled image latent coordinates (flow matching only).")
     parser.add_argument("--prompt-kind-dropout", type=float, default=0.2,
                         help="Classifier-free dropout probability for prompt-kind labels.")
     parser.add_argument("--token-decoder-lr", type=float, default=5e-3)
@@ -737,6 +754,10 @@ def main() -> None:
                         dest="eval_text_decode_batch_size", type=int, default=16)
     parser.add_argument("--no-eval-cider", action="store_true",
                         help="Skip CIDEr even if pycocoevalcap is installed.")
+    parser.add_argument("--eval-coco-cider", action="store_true",
+                        help="Also score PTB-tokenized COCO CIDEr (requires pycocoevalcap and Java).")
+    parser.add_argument("--eval-spice", action="store_true",
+                        help="Also score COCO SPICE (requires Java and CoreNLP; slower).")
     parser.add_argument("--no-eval-clipscore", action="store_true",
                         help="Skip CLIPScore (both i2t and t2i directions) even if installed.")
     parser.add_argument("--no-eval-genppl", action="store_true",
@@ -755,6 +776,11 @@ def main() -> None:
     parser.add_argument("--auto-resume", action="store_true",
                         help="If --resume is unset, resume from the newest "
                              "step_*.pt under --out-dir (for SLURM requeue).")
+    parser.add_argument("--resume-data-position", action="store_true",
+                        help="On resume, continue the training-data order where the "
+                             "checkpointed run stopped (epoch + offset from the samples "
+                             "consumed so far) instead of restarting epoch 0. Only "
+                             "indices are skipped, so this costs about one epoch start.")
     parser.add_argument("--seed", type=int, default=0)
 
     # Cache
@@ -767,8 +793,12 @@ def main() -> None:
         parser.error("--unconditional-percent must be between 0 and 1.")
     if args.force_unconditional and args.sde != "flow_matching":
         parser.error("--force-unconditional is only supported with --sde flow_matching.")
+    for value in (args.flow_text_sigma, args.flow_image_sigma):
+        if not math.isfinite(value) or value < 0:
+            parser.error("Flow endpoint sigmas must be finite and nonnegative.")
+    if args.sde != "flow_matching" and (args.flow_text_sigma or args.flow_image_sigma):
+        parser.error("Endpoint perturbations require --sde flow_matching.")
     if args.sde == "flow_matching":
-        assert args.force_unconditional, "I realized that the conditional path is degenerate and unnecessary, since flow matching is deterministic."
         if args.text_as_noise or args.image_as_noise:
             parser.error("Flow matching currently supports only data-to-data training.")
         if args.edm_precond:
@@ -789,6 +819,11 @@ def main() -> None:
             print("forcing --no-reverse=True and --unconditional-percent=1.0 because --force-unconditional is True")
             args.no_reverse = True
             args.unconditional_percent = 1.0
+        else:
+            if not args.no_forward and args.flow_text_sigma == 0:
+                parser.error("Conditional forward flow needs --flow-text-sigma > 0; use --no-forward or --force-unconditional.")
+            if not args.no_reverse and args.flow_image_sigma == 0:
+                parser.error("Conditional reverse flow needs --flow-image-sigma > 0; use --no-reverse or --force-unconditional.")
     can_infer_reverse = (not args.no_reverse) or (args.force_unconditional and args.sde == "flow_matching")
     print(f"can_infer_reverse: {can_infer_reverse}")
     if args.x0_cond_source != "x0":
@@ -1008,6 +1043,8 @@ def main() -> None:
         sde = FlowMatchingODE(
             score_network=model,
             force_unconditional=args.force_unconditional,
+            text_sigma=args.flow_text_sigma,
+            image_sigma=args.flow_image_sigma,
         )
     else:
         raise ValueError(f"unknown sde: {args.sde}")
@@ -1076,7 +1113,7 @@ def main() -> None:
             print(f"Text decode eval samples: {len(text_decode_eval_indices)} "
                   f"(requested {args.eval_text_decode_num_samples})")
 
-    train_sampler = DistributedSampler(
+    train_sampler = ResumableDistributedSampler(
         train_ds, num_replicas=world_size, rank=rank,
         shuffle=True, seed=args.seed, drop_last=True,
     )
@@ -1134,6 +1171,7 @@ def main() -> None:
 
     # ---- Resume
     train_steps = 0
+    data_samples_consumed = 0
     if args.auto_resume:
         assert args.resume is None
         args.resume = _find_latest_checkpoint(args.out_dir)
@@ -1150,6 +1188,9 @@ def main() -> None:
         # footprint against the already-instantiated model/EMA/optimizer.
         # load_state_dict below remaps each tensor to the param's device.
         ckpt = torch.load(args.resume, map_location="cpu", weights_only=False)
+        for key in ("flow_text_sigma", "flow_image_sigma"):
+            if getattr(args, key) != ckpt["args"].get(key, 0.0):
+                raise ValueError(f"Cannot resume with a different {key}; use the checkpoint's value.")
         if args.eval_only:
             _validate_eval_checkpoint_args(
                 args, ckpt, repa_image_dim,
@@ -1174,6 +1215,10 @@ def main() -> None:
             token_decoder.load_state_dict(ckpt["token_decoder"])
             token_decoder_optimizer.load_state_dict(ckpt["token_decoder_optimizer"])
         train_steps = int(ckpt.get("step", 0))
+        # Logical position in the data stream; older checkpoints lack it, and
+        # step * global batch is the same quantity when the batch never changed.
+        data_samples_consumed = int(ckpt.get(
+            "data_samples_consumed", train_steps * args.global_batch_size))
         # Drop the checkpoint dict now that everything is loaded; otherwise it
         # lingers in scope for the whole run as a full duplicate of the model /
         # EMAs / optimizer state and can OOM a resumed run on the first step.
@@ -1194,7 +1239,20 @@ def main() -> None:
     slow_windows = 0  # consecutive sub-threshold log windows (throughput watchdog)
     running: dict[str, float] = {}
     counts: dict[str, int] = {}
-    train_iter = cycle_loader(train_loader, train_sampler)
+    start_epoch, skip_first = 0, 0
+    if args.resume_data_position and data_samples_consumed > 0 and not args.eval_only:
+        start_epoch, skip_first = data_resume_position(
+            data_samples_consumed, steps_per_epoch=len(train_loader),
+            global_batch=args.global_batch_size, local_batch=local_batch)
+        if rank == 0:
+            print(f"[resume-data-position] {data_samples_consumed:,} samples consumed -> "
+                  f"epoch {start_epoch}, skipping {skip_first:,} indices per rank "
+                  f"({len(train_loader):,} steps/epoch)")
+    elif data_samples_consumed > 0 and rank == 0 and not args.eval_only:
+        print("[resume] restarting the data order at epoch 0 "
+              "(pass --resume-data-position to continue where the run stopped)")
+    train_iter = cycle_loader(train_loader, train_sampler,
+                              start_epoch=start_epoch, skip_first=skip_first)
     log_window_start = time()
     log_window_steps = 0
     # Straggler diagnostics: time spent blocked on the dataloader vs. in the
@@ -1304,6 +1362,7 @@ def main() -> None:
                 counts[k] = counts.get(k, 0) + 1
             log_window_steps += 1
             train_steps += 1
+            data_samples_consumed += args.global_batch_size
 
             # ---- Periodic logging
             if train_steps % args.log_every == 0:
@@ -1385,6 +1444,7 @@ def main() -> None:
                 ckpt_path = ckpt_dir / f"step_{train_steps:07d}.pt"
                 torch.save({
                     "step": train_steps,
+                    "data_samples_consumed": data_samples_consumed,
                     "model": model.module.state_dict(),
                     "ema": ema.state_dict(),
                     **({
@@ -1517,6 +1577,8 @@ def main() -> None:
                     token_layout=args.token_layout,
                     runtime_config=bridge_runtime,
                     compute_cider=not args.no_eval_cider,
+                    compute_coco_cider=args.eval_coco_cider,
+                    compute_spice=args.eval_spice,
                     compute_clipscore=not args.no_eval_clipscore,
                     compute_genppl=not args.no_eval_genppl,
                     genppl_model=args.eval_genppl_model,
@@ -1536,6 +1598,21 @@ def main() -> None:
                     for k, v in metric_logs.items()
                 )
                 print(f"eval step {train_steps:>7d} | {msg}")
+                if args.eval_only:
+                    # On-disk copy of the held-out metrics: a completion marker for
+                    # launchers (e.g. queue_rebuttal_experiments.sh) and table input.
+                    _metrics_path = eval_dir / "eval_metrics.json"
+                    _metrics_path.with_suffix(".json.tmp").write_text(json.dumps({
+                        "step": int(train_steps),
+                        "checkpoint": str(args.resume),
+                        "data_root": str(args.data_root),
+                        "val_fraction": args.val_fraction,
+                        "seed": args.seed,
+                        "eval_cfg_scales": list(eval_cfg_scales),
+                        "metrics": metric_logs,
+                    }, indent=2, default=float) + "\n")
+                    _metrics_path.with_suffix(".json.tmp").replace(_metrics_path)
+                    print(f"[eval-only] wrote {_metrics_path}")
             dist.barrier(group=eval_pg)
 
         # ---- Post eval/ckpt housekeeping

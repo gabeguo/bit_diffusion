@@ -1,0 +1,35 @@
+% Reviewer xYk4 (W2), small-scale version. Code: text_to_image/_launch_bit_small_scale.sh.
+% Fill \tbd{} from $PREFIX_DIR/BiB_results/bit_small_scale/<run>/eval_<step>/*/eval/eval_metrics.json
+% (eval/fid_cfg_0.0_sde, eval/fid/clipscore_t2i_cfg_0.0_sde,
+%  eval/text_decode/genppl_cfg_0.0_sde, eval/text_decode/clipscore_i2t_cfg_0.0_sde).
+\paragraph{Shared versus separate models at small scale.}\label{app:shared-vs-separate-small}
+We also compare joint and separate training with a smaller backbone, DiTXA-B/2 (12 blocks,
+hidden size 768, 201M parameters). The T2I specialist, the I2T specialist, and the shared
+model all use the Table~1 recipe, except that image REPA is applied at layer 4. That keeps
+REPA at one third of the trunk's depth, as layer 8 of 24 does in Table~1. All three train
+for 200K steps with batch 512 on the same data order. Each step of the shared model sums
+the two directional losses on the same batch, so at every checkpoint the shared model has
+used the same number of examples and optimizer updates per direction as each specialist,
+and the same total compute as the two specialists combined. It does this with half their
+combined parameters. We evaluate at 100K and 200K steps with $\omega=0$, 500 SDE steps, and
+10K held-out samples per direction. These FIDs use fewer samples than Table~1, so they are
+comparable only within this table.
+
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{llcccc}
+    \toprule
+    Model (DiTXA-B/2) & Steps & FID$_{10\mathrm{K}}$ ($\downarrow$) & CLIP T2I ($\uparrow$) & Gen PPL ($\downarrow$) & CLIP I2T ($\uparrow$) \\
+    \midrule
+    Specialists (T2I / I2T) & 100K & \tbd & \tbd & \tbd & \tbd \\
+    Shared & 100K & \tbd & \tbd & \tbd & \tbd \\
+    \midrule
+    Specialists (T2I / I2T) & 200K & \tbd & \tbd & \tbd & \tbd \\
+    Shared & 200K & \tbd & \tbd & \tbd & \tbd \\
+    \bottomrule
+  \end{tabular}
+  \caption{\textbf{One bidirectional network versus two specialists at small scale}
+    (compute- and data-matched per direction; $\omega=0$).}
+  \label{tab:shared-vs-separate-small}
+\end{table}

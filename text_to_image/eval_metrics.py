@@ -408,6 +408,8 @@ def compute_text_decode_distributed(
     token_layout: str = "row_major",
     runtime_config: BridgeRuntimeConfig = BRIDGE_RUNTIME_PRESETS["sd"],
     compute_cider: bool = True,
+    compute_coco_cider: bool = False,
+    compute_spice: bool = False,
     compute_clipscore: bool = True,
     compute_genppl: bool = True,
     genppl_model: str = "Qwen/Qwen3-1.7B",
@@ -483,8 +485,9 @@ def compute_text_decode_distributed(
     assert not bridge_config.text_as_noise, "This will just make us generate noise"
 
     with _temporarily_swap_score_network(sde, eval_model), autocast_ctx:
-        all_ref_caps: list[list[str]] = []
-        all_pred_caps: list[list[str]] = []
+        all_ref_caps: list[str] = []
+        all_pred_caps: list[str] = []
+        all_full_refs: list[str] = []
         for batch in tqdm(loader, desc="Computing text decode"):
             latent = batch["latent"].to(device, non_blocking=True).float()
             token_ids = batch["text_token_ids"].to(device, non_blocking=True).long()
@@ -534,6 +537,10 @@ def compute_text_decode_distributed(
             # gen-ppl scores the same predicted/reference captions.
             all_ref_caps.extend(ref_caps)
             all_pred_caps.extend(pred_caps)
+            if compute_coco_cider or compute_spice:
+                # Preserve the original full caption for standard scoring.
+                # GPIC has one reference; offline COCO uses all five instead.
+                all_full_refs.extend(batch["caption"])
 
             if clip_model is not None and pred_caps:
                 images = decode_latents(
@@ -562,6 +569,30 @@ def compute_text_decode_distributed(
             score, _ = cider_metric.compute_score(refs, hyps)
             cider_sum = float(score) * len(global_preds)
             cider_n = float(len(global_preds))
+
+    coco_scores = {}
+    if compute_coco_cider or compute_spice:
+        from caption_metrics import score_captions
+        gathered = [None] * world_size
+        dist.all_gather_object(gathered, (all_full_refs, all_pred_caps), group=eval_pg)
+        payload = [None]
+        if rank == 0:
+            try:
+                refs = [c for part, _ in gathered for c in part]
+                preds = [c for _, part in gathered for c in part]
+                scores = score_captions(
+                    {i: [s] for i, s in enumerate(refs)},
+                    {i: [s] for i, s in enumerate(preds)},
+                    legacy=False, cider=compute_coco_cider, spice=compute_spice,
+                )
+                payload[0] = (scores, None)
+            except Exception as exc:
+                payload[0] = ({}, str(exc))
+        # Send failures too, so other ranks do not hang in a later collective.
+        dist.broadcast_object_list(payload, src=0, group=eval_pg)
+        coco_scores, error = payload[0]
+        if error:
+            raise RuntimeError(error)
 
     # Generative perplexity: oracle-LM NLL over the decoded captions (and the
     # reference captions, as a baseline). Local NLL/token sums are SUM-all-reduced
@@ -603,6 +634,8 @@ def compute_text_decode_distributed(
     }
     if stats[3].item() > 0:
         out[f"eval/text_decode/cider_{tag}"] = (stats[2] / stats[3]).item()
+    for name, value in coco_scores.items():
+        out[f"eval/text_decode/{name}_{tag}"] = value
     if stats[5].item() > 0:
         clip_mean = (stats[4] / stats[5]).item()
         out[f"eval/text_decode/clipscore_i2t_{tag}"] = clip_mean

@@ -44,8 +44,6 @@ from tqdm import tqdm
 
 from data_utils.latent_dataset import CommonCatalogLatentDataset
 from eval_plot import decode_latents, _temporarily_swap_score_network
-from models.dit import DiT_models
-from models.token_decoder import SharedTokenDecoder
 from sde_utils.loss import sample_p_base_x_t_cond_x_0_x_1
 from sde_utils.sde import (
     CosineDecayingVolatilitySDE,
@@ -54,7 +52,6 @@ from sde_utils.sde import (
     UniformVolatilitySDE,
 )
 from token_bridge import (
-    PROMPT_NUM_CLASSES,
     bridge_config_from_manifest,
     bridge_to_token_flat,
     norm_based_token_stops,
@@ -81,88 +78,7 @@ def _is_single_field_flow(args: dict) -> bool:
 # Checkpoint loading
 # ---------------------------------------------------------------------------
 
-@dataclass
-class LoadedModel:
-    net: nn.Module
-    args: dict
-    token_decoder: Optional[nn.Module]
-    tokenizer: object
-    sde: object  # this model's own SDE (score_network swapped in per use)
-
-    @property
-    def is_noise2data(self) -> bool:
-        return bool(self.args.get("text_as_noise") or self.args.get("image_as_noise"))
-
-    def generates(self, modality: str) -> bool:
-        """Whether this model produces ``modality`` as (non-noise) output."""
-        if modality == "image":
-            return not self.args.get("image_as_noise") and not self.args.get("no_forward")
-        return not self.args.get("text_as_noise") and (
-            not self.args.get("no_reverse") or _is_single_field_flow(self.args)
-        )
-
-
-def build_sde(args: dict):
-    kind = args["sde"]
-    if kind == "uniform":
-        return UniformVolatilitySDE(A=0, K=args["K"], score_network=None)
-    if kind == "periodic":
-        return PeriodicVolatilitySDE(
-            alpha=args["periodic_sde_alpha"], k=args["periodic_sde_k"],
-            eps=args["periodic_sde_eps"], score_network=None,
-        )
-    if kind == "cosine_decay":
-        return CosineDecayingVolatilitySDE(
-            alpha=args["periodic_sde_alpha"], eps=args["periodic_sde_eps"],
-            score_network=None,
-        )
-    if kind == "flow_matching":
-        return FlowMatchingODE(
-            score_network=None,
-            force_unconditional=args["force_unconditional"],
-        )
-    raise ValueError(f"unknown sde {kind!r}")
-
-
-def load_model(ckpt_path: str, data_root: str, device: torch.device) -> LoadedModel:
-    """Rebuild a model + (optional) token decoder from a training checkpoint,
-    loading the EMA weights (what training-time eval uses)."""
-    # mmap keeps the (large) optimizer / alt-EMA tensors on disk; we only copy
-    # the EMA weights + token decoder into the model.
-    ckpt = torch.load(_resolve_ckpt(ckpt_path), map_location="cpu", weights_only=False, mmap=True)
-    a = ckpt["args"]
-    assert not a.get("edm_precond", False), "EDM-preconditioned checkpoints are unsupported."
-    assert "XA" in a["model"], "cross-attention model required"
-
-    assert a.get("token_layout") == "row_major", "only row_major token layout is supported"
-
-    runtime = bridge_config_from_manifest(data_root, preset=a.get("bridge_preset", "auto"))
-    bc = runtime.bridge
-    # Build WITHOUT the REPA heads: they are training-only and their dims depend
-    # on sidecars we don't have here. We drop those keys when loading (below).
-    net = DiT_models[a["model"]](
-        input_size=bc.height, in_channels=bc.channels,
-        num_classes=PROMPT_NUM_CLASSES if a["use_token_text_bridge"] else a["num_classes"],
-        class_dropout_prob=a["prompt_kind_dropout"] if a["use_token_text_bridge"] else 0.0,
-        forward_cond_scale=a["forward_cond_scale"],
-    ).to(device).eval()
-    missing, unexpected = net.load_state_dict(ckpt["ema"], strict=False)
-    assert not missing, f"missing keys loading {ckpt_path}: {missing}"
-    assert all("repa" in k for k in unexpected), f"unexpected keys: {unexpected}"
-
-    token_decoder, tokenizer = None, None
-    if "token_decoder" in ckpt:
-        from transformers import AutoTokenizer
-        tcfg = json.loads((Path(data_root) / "token_embed_config.json").read_text())["config"]
-        tokenizer = AutoTokenizer.from_pretrained(tcfg["text_model"])
-        token_decoder = SharedTokenDecoder(
-            vocab_size=len(tokenizer),
-            hidden_dim=a["token_decoder_hidden_dim"],
-            token_seq_len=bc.token_seq_len, token_emb_dim=bc.token_emb_dim,
-        ).to(device).eval()
-        token_decoder.load_state_dict(ckpt["token_decoder"])
-    return LoadedModel(net=net, args=a, token_decoder=token_decoder,
-                       tokenizer=tokenizer, sde=build_sde(a))
+from checkpoint_utils import LoadedModel, build_sde, load_model
 
 
 def resolve_mode(fwd, rev, modality: str) -> str:
@@ -172,6 +88,9 @@ def resolve_mode(fwd, rev, modality: str) -> str:
     """
     present = [m for m in (fwd, rev) if m is not None]
     assert present, "pass at least one of --forward-ckpt / --reverse-ckpt"
+    if any(m.args.get("flow_text_sigma", 0) or m.args.get("flow_image_sigma", 0)
+           for m in present):
+        raise ValueError("Noisy endpoint flows support generation, but this partial-trajectory editing protocol is not defined for them.")
     n2d = present[0].is_noise2data
     assert all(m.is_noise2data == n2d for m in present), "cannot mix noise2data and data2data"
 
@@ -565,7 +484,9 @@ def run(args):
                     args.noise_nfe, 
                     f - f_prev if args.cache_perturbed_samples else f
                 ),
-                restore_nfe=_scale_nfe(args.restore_nfe, f), infer_nfe=_scale_nfe(args.infer_nfe, f))
+                # Cross-modal inference (n2d_two) always traverses the WHOLE bridge,
+                # so its constant-dt count is the full base, not base * f.
+                restore_nfe=_scale_nfe(args.restore_nfe, f), infer_nfe=args.infer_nfe)
             with autocast:
                 noised, out = restore(mode=mode, fwd=fwd, rev=rev, modality=args.generate_modality,
                                       src_img=src_img, src_text=src_text, y=y, t_stop=t_stop, ctx=fctx,
@@ -699,8 +620,9 @@ def parse_args():
     p.add_argument("--infer-nfe", type=int, default=100,
                    help="NFE for cross-modal inference (two-model noise-to-data).")
     p.add_argument("--proportional-nfe", action="store_true",
-                   help="Scale the noising/restoration/inference NFE by the corruption fraction "
-                        "(base NFE = count per full unit of travel), holding the step size dt constant across fractions.")
+                   help="Scale the noising/restoration NFE by the corruption fraction "
+                        "(base NFE = count per full unit of travel), holding the step size dt constant across fractions. "
+                        "Cross-modal inference (n2d_two) always uses the full --infer-nfe.")
     p.add_argument("--cache-perturbed-samples", action="store_true", default=False,
                    help="Cache the perturbed samples for the next fraction. This can reduce the total NFE in the data-to-data path. Only supported for data2data_single and data2data_two modes when proportional_nfe is enabled.")
     p.add_argument("--cfg-scale", type=float, default=0.0)

@@ -1,0 +1,36 @@
+% Appendix L addition: setup of the FlowTok-XL and CrossFlow rows of Table 2
+% (Reviewer 6E8U). Code: text_to_image/external_baselines.py.
+\paragraph{Data-to-data flow baselines.}\label{app:external-baselines}
+FlowTok~\citep{he2025flowtok} and CrossFlow~\citep{liu2025crossflow} also transport text
+representations directly into images, but with a deterministic flow ODE. Each makes its
+source endpoint stochastic with a text variational encoder trained with auxiliary
+objectives. We evaluate the publicly released checkpoints with the authors' code, and keep
+each model's own text encoder, text variational encoder, Euler ODE solver, image decoder,
+and guidance. Settings follow the released inference recipes:
+\begin{itemize}
+  \item \textbf{FlowTok-XL.} Prompts are encoded with the CLIP ViT-L/14-336 text encoder.
+    A text latent is sampled from FlowTok's text variational encoder and integrated with
+    20 Euler steps at guidance scale $s=2$. The result is decoded with the released
+    512-px FlowTiTok decoder.
+  \item \textbf{CrossFlow.} We use the released 256-px DiMR model conditioned on CLIP
+    ViT-L/14. A text latent is sampled from its text variational encoder and integrated
+    with 50 Euler steps at guidance scale $s=7$. The result is decoded with the
+    Stable Diffusion autoencoder.
+\end{itemize}
+Both libraries apply guidance as $\mathbf{v}_{\varnothing}+s(\mathbf{v}_{c}-\mathbf{v}_{\varnothing})$,
+which corresponds to $\omega=s-1$ in Eq.~\eqref{eq:cfg-forward}.
+
+We score both models exactly as we score \BIT{}. We use the same 50{,}000 held-out GPIC
+captions (App.~I.1). FID uses 2048-dimensional Inception features and the same reference
+images, i.e.\ the $256\times256$ Stable Diffusion VAE decodings of the held-out latents.
+CLIP T2I is the ViT-B/16 score between each generated image and its full caption.
+FlowTok-XL images are resized from $512\times512$ to $256\times256$ (bicubic, with
+antialiasing) before scoring; CrossFlow generates $256\times256$ images natively. Neither
+release includes an image-to-text checkpoint, so we do not report I2T metrics for them.
+
+As with the other rows of Table~\ref{tab:foundation}, these numbers are external anchors,
+not like-for-like comparisons. The released models differ from ours in training data
+(e.g.\ LAION-400M and JourneyDB for CrossFlow), text encoder, resolution, architecture, and
+compute. The controlled comparison of the stochastic-endpoint strategy is the
+noise-injected flow baseline trained with our data, architecture, and budget
+(App.~\ref{app:stochastic-flow}).
